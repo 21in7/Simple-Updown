@@ -1,5 +1,5 @@
 # Frontend build stage
-FROM node:16 AS frontend-builder
+FROM --platform=${BUILDPLATFORM:-linux/amd64} node:16 AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -10,7 +10,7 @@ COPY simple-updown-frontend/ .
 RUN npm run build
 
 # Backend build stage
-FROM python:3.12-slim
+FROM --platform=${TARGETPLATFORM:-linux/amd64} python:3.12-slim
 
 WORKDIR /app
 

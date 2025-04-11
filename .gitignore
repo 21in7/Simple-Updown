@@ -11,3 +11,5 @@ __pycache__
 # doesn't use
 templates
 
+# .sh
+git.sh
