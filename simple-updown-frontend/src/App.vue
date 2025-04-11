@@ -1,21 +1,17 @@
 <template>
   <div id="app">
     <h1>파일 업로드 및 다운로드 서비스</h1>
-    <FileUpload />
-    <FilesList />
+    <router-link to="/">파일 업로드</router-link>
+    <router-link to="/files">파일 목록</router-link>
+    <router-view></router-view>
   </div>
 </template>
 
 <script>
-import FileUpload from './components/FileUpload.vue';
-import FilesList from './components/FilesList.vue';
+
 
 export default {
-  name: 'App',
-  components: {
-    FileUpload,
-    FilesList
-  }
+  name: 'App'
 }
 </script>
 
