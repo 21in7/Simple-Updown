@@ -11,6 +11,7 @@ from datetime import timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from database import FileMetadataDB
@@ -38,6 +39,15 @@ def format_file_size(size_in_bytes):
 app = FastAPI(title="File Storage Service")
 db = FileMetadataDB()
 r2 = R2Storage()
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 templates = Jinja2Templates(directory="templates")
 

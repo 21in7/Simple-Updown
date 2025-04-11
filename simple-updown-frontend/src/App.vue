@@ -1,15 +1,20 @@
 <template>
-  <img alt="Vue logo" src="./assets/logo.png">
-  <HelloWorld msg="Welcome to Your Vue.js App"/>
+  <div id="app">
+    <h1>파일 업로드 및 다운로드 서비스</h1>
+    <Upload />
+    <Files />
+  </div>
 </template>
 
 <script>
-import HelloWorld from './components/HelloWorld.vue'
+import FileUpload from './components/FileUpload.vue';
+import FilesList from './components/FilesList.vue';
 
 export default {
   name: 'App',
   components: {
-    HelloWorld
+    FileUpload,
+    FilesList
   }
 }
 </script>
