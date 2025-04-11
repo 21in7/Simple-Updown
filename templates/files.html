@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>File List</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px 12px; border: 1px solid #ddd; text-align: left; vertical-align: middle; }
+        th { background-color: #f4f4f4; }
+        button { padding: 5px 10px; color: white; background-color: red; border: none; cursor: pointer; }
+        .thumbnail { max-width: 100px; max-height: 100px; }
+        .success-message { 
+            background-color: #dff0d8; 
+            color: #3c763d; 
+            padding: 10px; 
+            margin-bottom: 20px; 
+            border-radius: 4px; 
+            text-align: center;
+        }
+    </style>
+    <script>
+        function deleteFile(fileHash) {
+            fetch(`/files/${fileHash}`, {
+                method: 'DELETE'
+            })
+            .then(response => {
+                if (response.ok) {
+                    alert('File deleted successfully');
+                    location.reload();
+                } else {
+                    alert('Failed to delete file');
+                }
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>File List</h1>
+    <nav>
+        <a href="/">Main Page</a>
+    </nav>
+    
+    {% if upload_complete %}
+    <div class="success-message">
+        <strong>성공!</strong> 파일이 성공적으로 업로드되었습니다.
+    </div>
+    {% endif %}
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Thumbnail</th>
+                <th>File Name</th>
+                <th>Size</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc_id, metadata in files.items() %}
+            <tr>
+                <td>
+                    {% if metadata.content_type and metadata.content_type.startswith('image/') %}
+                    <img src="/thumbnail/{{ metadata.hash.sha256 }}" alt="{{ metadata.file_name }}" class="thumbnail" />
+                    {% else %}
+                    <!-- 일반 파일 아이콘 표시 -->
+                    <span>📄</span>
+                    {% endif %}
+                </td>
+                <td>{{ metadata.file_name }}</td>
+                <td>{{ metadata.formatted_size }}</td>
+                <td>
+                    <a href="/download/{{ metadata.hash.sha256 }}" target="_blank">Download</a>
+                    <button onclick="deleteFile('{{ metadata.hash.sha256 }}')">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

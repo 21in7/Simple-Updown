@@ -1,0 +1,9 @@
+# .env
+.env
+
+# json
+file_metadata.json
+
+# python venv
+updown/
+__pycache__

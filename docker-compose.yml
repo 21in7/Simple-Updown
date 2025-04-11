@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./:/app
+      - file_metadata:/app/file_metadata
+    env_file:
+      - .env
+    restart: unless-stopped
+    container_name: file-storage-app
+    networks:
+      - app-network
+
+  # MinIO 서비스 (R2 대체용 로컬 개발 환경)
+  minio:
+    image: minio/minio
+    ports:
+      - "9001:9000"
+      - "9002:9001"  # Console port
+    volumes:
+      - minio_data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    command: server --console-address ":9001" /data
+    container_name: minio-service
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  file_metadata:
+  minio_data: 
