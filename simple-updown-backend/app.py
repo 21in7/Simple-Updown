@@ -51,6 +51,8 @@ app.add_middleware(
 # 정적 파일 제공
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+#app.mount("/css", StaticFiles(directory="static/css"), name="css")
+#app.mount("/js", StaticFiles(directory="static/js"), name="js")
 
 @app.get("/")
 async def serve_frontend():
