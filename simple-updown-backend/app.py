@@ -9,9 +9,10 @@ import pyshorteners
 import io
 from datetime import timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse
+from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from database import FileMetadataDB
@@ -51,7 +52,19 @@ def format_file_size(size_in_bytes):
     else:
         return f"{size_in_bytes / (1024 * 1024 * 1024):.2f} GB"
 
-app = FastAPI(title="File Storage Service")
+# 앱 시작시 정리 작업 수행
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # 앱 시작 시 실행할 코드
+    cleanup_orphaned_files()
+    yield
+    # 앱 종료시 실행할 코드
+    pass
+
+app = FastAPI(
+    title="File Storage Service",
+    lifespan=lifespan
+)
 db = FileMetadataDB()
 r2 = R2Storage()
 
@@ -64,7 +77,6 @@ app.add_middleware(
 )
 
 # 정적 파일 제공
-
 app.mount("/static", StaticFiles(directory="static"), name="static")
 #app.mount("/css", StaticFiles(directory="static/css"), name="css")
 #app.mount("/js", StaticFiles(directory="static/js"), name="js")
@@ -74,14 +86,36 @@ async def serve_frontend():
     return FileResponse('static/index.html')
 
 @app.get("/files/")
-async def list_files():
+async def list_files_page():
     return FileResponse('static/index.html')
 
-@app.get("/api/files/")
-async def list_files():
-    files = []
+@app.get("/files/{path:path}")
+async def serve_files_path(path: str):
+    return FileResponse('static/index.html')
+
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc: HTTPException):
+    # API 경로는 그대로 404 반환
+    if request.url.path.startswith("/api/") or request.url.path.startswith("/download/"):
+        return JSONResponse(
+            status_code=404,
+            content={"detail": "Not Found"}
+        )
+    # 그 외 경로는 index.html로 리다이렉트하여 SPA 라우팅 지원
+    return FileResponse('static/index.html')
+
+def cleanup_orphaned_files():
+    """
+    데이터베이스에 있는 모든 파일 메타데이터를 확인하고
+    실제로 존재하지 않는 파일의 메타데이터는 삭제합니다.
+    """
+    deleted_count = 0
     for doc_id, metadata in db.list_all().items():
         file_hash = metadata.get("hash", {}).get("sha256")
+        if not file_hash:
+            db.delete(doc_id)
+            deleted_count += 1
+            continue
 
         # 파일 존재 여부 확인
         file_exists = False
@@ -92,119 +126,193 @@ async def list_files():
             # R2 또는 다른 스토리지의 경우
             file_exists = storage.file_exists(file_hash)
 
-        # 존재하는 파일만 목록에 추가하거나 존재 여부 플래그 포함
+        if not file_exists:
+            db.delete(doc_id)
+            deleted_count += 1
+
+    print(f"정리 완료: {deleted_count}개의 메타데이터 항목이 삭제되었습니다.")
+
+@app.get("/api/files/")
+async def list_files():
+    files = []
+    for doc_id, metadata in db.list_all().items():
+        file_hash = metadata.get("hash", {}).get("sha256")
+        
+        # 파일 해시가 없으면 항목을 삭제하고 건너뜁니다
+        if not file_hash:
+            db.delete(doc_id)
+            continue
+            
+        # 파일 존재 여부 확인
+        file_exists = False
+        if storage_type == "local":
+            file_path = os.path.join(storage.upload_dir, file_hash)
+            file_exists = os.path.isfile(file_path)
+        else:
+            # R2 또는 다른 스토리지의 경우
+            file_exists = storage.file_exists(file_hash)
+        
+        # 존재하는 파일만 목록에 추가
         if file_exists:
             # 파일 크기가 없거나 형식이 잘못된 경우 수정
-            if "file_size" not in metadata or not isinstance(metadata["file_size"], (int, float)):
-                metadata["file_size"] = 0
-                metadata["formatted_size"] = "0 B"
-
+            if "file_size" not in metadata or not isinstance(metadata["file_size"], (int, float)) or metadata["file_size"] <= 0:
+                # 파일 크기가 0 이하면 항목 삭제하고 건너뜁니다
+                db.delete(doc_id)
+                continue
+            
+            # 파일명이 없는 경우 처리
+            if "file_name" not in metadata or not metadata["file_name"]:
+                # 파일명이 없으면 항목 삭제하고 건너뜁니다
+                db.delete(doc_id)
+                continue
+            
+            # 유효한 파일 항목만 목록에 추가
             files.append(metadata)
         else:
             # 존재하지 않는 파일의 메타데이터 삭제
             db.delete(doc_id)
+    
     return {"files": files}
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
-    # Calculate file hash to use as unique identifier
+    # 파일 크기 확인 (0 바이트 파일 체크)
     contents = await file.read()
-
-    # 파일 크기 검증
     file_size = len(contents)
+    
     if file_size <= 0:
-        file_size = 0
-
+        raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
+    
+    # 파일 해시 계산
     file_hash = hashlib.sha256(contents).hexdigest()
-
-    # Create temporary file
+    
+    # 임시 파일 생성
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         temp_file.write(contents)
         temp_file_path = temp_file.name
-
-    # Reset file position for subsequent reads
+    
+    # 파일 포인터를 다시 처음으로 되돌림
     await file.seek(0)
-
-
-
-    # Calculate additional hashes for metadata
+    
+    # 추가 해시 계산
     md5_hash = hashlib.md5(contents).hexdigest()
     sha1_hash = hashlib.sha1(contents).hexdigest()
-
-    # Upload Local or R2
-    if storage_type == "local":
-        storage.upload_file(temp_file_path, file_hash)
-    else:
-        r2.upload_file(temp_file_path, file_hash)
-
-    # Remove temporary file
-    os.unlink(temp_file_path)
-
-    # 만료 시간 계산
-    expire_time = datetime.datetime.now() + timedelta(minutes=expire_in_minutes)
-
-    # 파일 저장 시간 계산
-    add_time = datetime.datetime.now()
-
-    # Store metadata in NoSQL database
-    metadata = {
-        "file_name": file.filename,
-        "file_size": len(contents),
-        "formatted_size": format_file_size(len(contents)),
-        "content_type": file.content_type,
-        "hash": {
-            "md5": md5_hash,
-            "sha1": sha1_hash,
-            "sha256": file_hash
-        },
-        "expire_time": expire_time.isoformat(), # ISO 포맷으로 저장
-        "date": add_time.isoformat()
-    }
-
-    doc_id = db.insert(metadata)
-    return {
-        "success": True,
-        "message": "File uploaded successfully.",
-        "redirect_to": "/files/",
-        "file_info": metadata
-    }
+    
+    # 파일 업로드
+    try:
+        if storage_type == "local":
+            storage.upload_file(temp_file_path, file_hash)
+        else:
+            r2.upload_file(temp_file_path, file_hash)
+            
+        # 임시 파일 삭제
+        os.unlink(temp_file_path)
+        
+        # 만료 시간 계산
+        expire_time = datetime.datetime.now() + timedelta(minutes=expire_in_minutes)
+        
+        # 파일 저장 시간 계산
+        add_time = datetime.datetime.now()
+        
+        # 메타데이터 저장
+        metadata = {
+            "file_name": file.filename,
+            "file_size": file_size,
+            "formatted_size": format_file_size(file_size),
+            "content_type": file.content_type,
+            "hash": {
+                "md5": md5_hash,
+                "sha1": sha1_hash,
+                "sha256": file_hash
+            },
+            "expire_time": expire_time.isoformat(),  # ISO 포맷으로 저장
+            "date": add_time.isoformat()
+        }
+        
+        doc_id = db.insert(metadata)
+        
+        return {
+            "success": True,
+            "message": "File uploaded successfully.",
+            "redirect_to": "/files/",
+            "file_info": metadata
+        }
+    except Exception as e:
+        # 에러 발생 시 임시 파일이 남아있다면 삭제
+        if os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
+        raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
 
 @app.get("/download/{file_hash}")
 async def download_file(file_hash: str):
-    # Search for file metadata by hash
-    for doc_id, metadata in db.list_all().items():
-        if metadata.get("hash", {}).get("sha256") == file_hash:
-            # 만료 시간 확인
-            expire_time = datetime.datetime.fromisoformat(metadata.get("expire_time"))
-            if datetime.datetime.now() > expire_time:
-                # 파일 삭제
-                r2.delete_file(file_hash)
-                db.delete(doc_id)
-                raise HTTPException(status_code=404, detail="File expired and deleted")
-
-            # Get file from R2
-            file_stream = r2.get_file_stream(file_hash)
-            
-            if file_stream:
-                # Return file as streaming response
-                return StreamingResponse(
-                    file_stream, 
-                    media_type="application/octet-stream",
-                    headers={"Content-Disposition": f"attachment; filename={metadata['file_name']}"}
-                )
+    # 파일 메타데이터 검색
+    file_metadata = None
+    doc_id = None
     
-    raise HTTPException(status_code=404, detail="File not found")
+    for d_id, metadata in db.list_all().items():
+        if metadata.get("hash", {}).get("sha256") == file_hash:
+            file_metadata = metadata
+            doc_id = d_id
+            break
+    
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # 만료 시간 확인
+    expire_time = datetime.datetime.fromisoformat(file_metadata.get("expire_time"))
+    if datetime.datetime.now() > expire_time:
+        # 파일 삭제
+        if storage_type == "local":
+            storage.delete_file(file_hash)
+        else:
+            r2.delete_file(file_hash)
+        
+        db.delete(doc_id)
+        raise HTTPException(status_code=404, detail="File expired and deleted")
+    
+    # 파일 스트림 가져오기
+    file_stream = None
+    if storage_type == "local":
+        file_path = os.path.join(storage.upload_dir, file_hash)
+        if os.path.exists(file_path):
+            return FileResponse(
+                file_path,
+                media_type="application/octet-stream",
+                filename=file_metadata['file_name']
+            )
+        else:
+            # 메타데이터는 있지만 파일이 없는 경우
+            db.delete(doc_id)
+            raise HTTPException(status_code=404, detail="File not found")
+    else:
+        file_stream = r2.get_file_stream(file_hash)
+        
+        if file_stream:
+            # 파일을 스트리밍 응답으로 반환
+            return StreamingResponse(
+                file_stream,
+                media_type="application/octet-stream",
+                headers={"Content-Disposition": f"attachment; filename={file_metadata['file_name']}"}
+            )
+        else:
+            # 메타데이터는 있지만 파일이 없는 경우
+            db.delete(doc_id)
+            raise HTTPException(status_code=404, detail="File not found")
 
 @app.delete("/files/{file_hash}")
 async def delete_file(file_hash: str):
-    # Search for file by hash
+    # 파일 검색
     for doc_id, metadata in db.list_all().items():
         if metadata.get("hash", {}).get("sha256") == file_hash:
-            # Delete from R2
-            success = r2.delete_file(file_hash)
-            
+            # 파일 삭제
+            success = False
+            if storage_type == "local":
+                success = storage.delete_file(file_hash)
+            else:
+                success = r2.delete_file(file_hash)
+                
             if success:
-                # Delete metadata
+                # 메타데이터 삭제
                 db.delete(doc_id)
                 return {"message": "File deleted successfully"}
             else:
@@ -212,63 +320,39 @@ async def delete_file(file_hash: str):
     
     raise HTTPException(status_code=404, detail="File not found")
 
-@app.get("/thumbnail/{file_hash}")
-async def get_thumbnail(file_hash: str):
-    # PIL이 설치되어 있는지 확인
-    if Image is None:
-        raise HTTPException(status_code=501, detail="Thumbnail generation not available")
-    
-    # 파일 메타데이터 검색
-    for doc_id, metadata in db.list_all().items():
-        if metadata.get("hash", {}).get("sha256") == file_hash:
-            # 컨텐츠 타입이 이미지인지 확인
-            if not metadata.get("content_type", "").startswith("image/"):
-                raise HTTPException(status_code=400, detail="Not an image file")
-            
-            # 만료 시간 확인
-            expire_time = datetime.datetime.fromisoformat(metadata.get("expire_time"))
-            if datetime.datetime.utcnow() > expire_time:
-                # 파일 삭제
-                r2.delete_file(file_hash)
-                db.delete(doc_id)
-                raise HTTPException(status_code=404, detail="File expired and deleted")
-            
-            # R2에서 파일 가져오기
-            file_stream = r2.get_file_stream(file_hash)
-            if file_stream:
-                try:
-                    # 이미지 로드 및 썸네일 생성
-                    img = Image.open(io.BytesIO(file_stream.read()))
-                    img.thumbnail((100, 100))
-                    
-                    # 썸네일을 바이트로 변환
-                    thumb_io = io.BytesIO()
-                    img_format = img.format if img.format else 'JPEG'
-                    img.save(thumb_io, format=img_format)
-                    thumb_io.seek(0)
-                    
-                    # 썸네일 반환
-                    return StreamingResponse(
-                        thumb_io, 
-                        media_type=metadata.get("content_type")
-                    )
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
-    
-    raise HTTPException(status_code=404, detail="File not found")
-
+# 만료된 파일 삭제 함수
 def delete_expired_files():
     expired_docs = []
+    current_time = datetime.datetime.now()
+    
     for doc_id, metadata in db.list_all().items():
-        expire_time = datetime.datetime.fromisoformat(metadata.get("expire_time"))
-        if datetime.datetime.now() > expire_time:
-            r2.delete_file(metadata["hash"]["sha256"])
+        if "expire_time" not in metadata:
             expired_docs.append(doc_id)
-
+            continue
+            
+        try:
+            expire_time = datetime.datetime.fromisoformat(metadata.get("expire_time"))
+            if current_time > expire_time:
+                file_hash = metadata.get("hash", {}).get("sha256")
+                if file_hash:
+                    if storage_type == "local":
+                        storage.delete_file(file_hash)
+                    else:
+                        r2.delete_file(file_hash)
+                expired_docs.append(doc_id)
+        except (ValueError, TypeError):
+            # 날짜 형식이 잘못된 경우 해당 항목 삭제
+            expired_docs.append(doc_id)
+    
     # 반복이 끝난 후에 삭제
     for doc_id in expired_docs:
         db.delete(doc_id)
+    
+    if expired_docs:
+        print(f"{len(expired_docs)}개의 만료된 파일 삭제됨")
 
+# 스케줄러 설정
 scheduler = BackgroundScheduler()
 scheduler.add_job(delete_expired_files, 'interval', minutes=1)
+scheduler.add_job(cleanup_orphaned_files, 'interval', hours=1)  # 정기적으로 고아 파일 정리
 scheduler.start()

@@ -21,11 +21,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code
 COPY simple-updown-backend/ .
 
-# Copy built frontend to backend static files
-COPY --from=frontend-builder /app/frontend/dist /app/static
+# Create necessary directories
+RUN mkdir -p /app/static /app/uploads
 
-# Create upload directory
-RUN mkdir -p /app/uploads
+# Copy built frontend to backend static files
+COPY --from=frontend-builder /app/frontend/dist/ /app/static/
 
 # Expose API port
 EXPOSE 9000
