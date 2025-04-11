@@ -4,9 +4,7 @@ services:
     ports:
       - "9000:9000"
     volumes:
-      - /path/to/dir:/app/uploads
-    environment:
-      - STORAGE_TYPE=local
+      - ${UPLOAD_PATH:-./uploads}:/app/uploads
     restart: unless-stopped
     container_name: file-storage-app-local
     networks:

@@ -9,8 +9,6 @@ services:
       - ${TEMP_UPLOAD_PATH:-./temp_uploads}:/app/uploads
     env_file:
       - .env
-    environment:
-      - STORAGE_TYPE=r2
     restart: unless-stopped
     container_name: file-storage-app-r2
     networks:

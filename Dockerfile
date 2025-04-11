@@ -14,6 +14,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Define build argument and set it as environment variable
+ARG STORAGE_TYPE=local
+ENV STORAGE_TYPE=${STORAGE_TYPE}
+
 # Copy backend requirements and install
 COPY simple-updown-backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
