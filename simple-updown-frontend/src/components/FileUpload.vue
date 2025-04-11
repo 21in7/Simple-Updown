@@ -91,11 +91,11 @@ export default {
       if (!this.selectedFile) return;
       
       // 디버깅 로그 추가
-      console.log('업로드 시작할 파일:', {
-        name: this.selectedFile.name,
-        type: this.selectedFile.type,
-        size: this.selectedFile.size
-      });
+      //console.log('업로드 시작할 파일:', {
+      //  name: this.selectedFile.name,
+      //  type: this.selectedFile.type,
+      //  size: this.selectedFile.size
+      //});
       
       const formData = new FormData();
       formData.append('file', this.selectedFile);
@@ -112,7 +112,7 @@ export default {
         });
         
         // 업로드 응답 로깅
-        console.log('업로드 응답:', response.data);
+        //console.log('업로드 응답:', response.data);
         
         if (response.data.success) {
           // 파일 목록 페이지로 이동하기 전에 500ms 지연
@@ -127,7 +127,7 @@ export default {
       } catch (error) {
         console.error('Error uploading file:', error);
         if (error.response) {
-          console.error('서버 응답:', error.response.data);
+          //console.error('서버 응답:', error.response.data);
         }
       }
     }

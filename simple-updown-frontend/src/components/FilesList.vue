@@ -69,7 +69,7 @@
     computed: {
       filteredFiles() {
         const now = new Date();
-        console.log('현재 시간:', now.toISOString());
+        //console.log('현재 시간:', now.toISOString());
         
         // 유효성 검사는 fetchFiles에서 이미 수행했으므로 여기서는 만료 시간만 확인
         return this.files.filter(file => {
@@ -83,12 +83,12 @@
               expireTime = new Date(file.expire_time + 'Z');
             }
             
-            console.log(`파일 ${file.file_name} 만료 시간:`, file.expire_time);
-            console.log(`만료여부 비교 결과:`, expireTime > now, `(${expireTime.getTime()} > ${now.getTime()})`);
+            //console.log(`파일 ${file.file_name} 만료 시간:`, file.expire_time);
+            //console.log(`만료여부 비교 결과:`, expireTime > now, `(${expireTime.getTime()} > ${now.getTime()})`);
             
             return expireTime > now;
           } catch (e) {
-            console.error('만료 시간 파싱 오류:', e, file);
+            //console.error('만료 시간 파싱 오류:', e, file);
             return false;
           }
         });
@@ -113,7 +113,7 @@
           const response = await axios.get('/api/files/');
           if (response.data && response.data.files) {
             // 디버깅: 서버로부터 받은 원본 파일 목록
-            console.log('서버에서 받은 파일 목록:', response.data.files);
+            //console.log('서버에서 받은 파일 목록:', response.data.files);
             
             // 유효하지 않은 파일은 필터링하여 제외
             this.files = response.data.files.filter(file => {
@@ -131,13 +131,13 @@
             });
             
             // 필터링 후 남은 파일 목록
-            console.log('필터링 후 파일 목록:', this.files);
+            //console.log('필터링 후 파일 목록:', this.files);
           } else {
             this.files = [];
             console.error('Invalid response format:', response.data);
           }
         } catch (error) {
-          console.error('Error fetching files:', error);
+          //console.error('Error fetching files:', error);
           this.files = [];
         } finally {
           this.loading = false;
@@ -188,7 +188,7 @@
         if (!dateStr) return '';
         try {
           // UTC 시간을 로컬 시간으로 변환
-          console.log(`formatDate 원본 문자열:`, dateStr);
+          //console.log(`formatDate 원본 문자열:`, dateStr);
           
           // UTC 시간대 처리 (Z가 있으면 UTC)
           let date;
@@ -199,18 +199,18 @@
             date = new Date(dateStr + 'Z');
           }
           
-          console.log(`변환된 날짜 객체:`, date);
-          console.log(`로컬 시간으로:`, new Date(date).toLocaleString());
+          //console.log(`변환된 날짜 객체:`, date);
+          //console.log(`로컬 시간으로:`, new Date(date).toLocaleString());
           
           if (isNaN(date.getTime())) {
-            console.error('유효하지 않은 날짜:', dateStr);
+            //console.error('유효하지 않은 날짜:', dateStr);
             return '날짜 오류';
           }
           
           // 로컬 시간으로 포맷팅
           return `${date.getFullYear()}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         } catch (error) {
-          console.error('Error formatting date:', error);
+          //console.error('Error formatting date:', error);
           return '날짜 오류';
         }
       },
@@ -245,10 +245,10 @@
             expireTime = new Date(expireTimeStr + 'Z');
           }
           
-          console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
+          //console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
           
           const diffMs = expireTime - now;
-          console.log(`시간차이(ms): ${diffMs}`);
+          //console.log(`시간차이(ms): ${diffMs}`);
           
           if (diffMs <= 0) return '만료됨';
           
@@ -264,20 +264,20 @@
             return `${diffMinutes}분 남음`;
           }
         } catch (error) {
-          console.error('Error calculating time left:', error);
+          //console.error('Error calculating time left:', error);
           return '시간 계산 오류';
         }
       },
       async downloadFile(file) {
         try {
-          console.log(`파일 다운로드 요청: ${file.file_name}, 해시: ${file.hash.sha256}`);
+          //console.log(`파일 다운로드 요청: ${file.file_name}, 해시: ${file.hash.sha256}`);
           
           const response = await axios.get(`/download/${file.hash.sha256}`, { 
             responseType: 'blob',
             timeout: 30000 // 30초 타임아웃 설정
           });
           
-          console.log('다운로드 응답 성공:', response.status, response.headers);
+          //console.log('다운로드 응답 성공:', response.status, response.headers);
           
           const contentType = response.headers['content-type'] || 'application/octet-stream';
           const url = window.URL.createObjectURL(new Blob([response.data], { type: contentType }));
@@ -293,15 +293,15 @@
             window.URL.revokeObjectURL(url);
           }, 100);
           
-          console.log('파일 다운로드 완료');
+          //console.log('파일 다운로드 완료');
         } catch (error) {
-          console.error('Error downloading file:', error);
+          //console.error('Error downloading file:', error);
           
           let errorMessage = '파일 다운로드 중 오류가 발생했습니다.';
           
           // 상태 코드에 따른 오류 메시지
           if (error.response) {
-            console.error('서버 응답:', error.response.status, error.response.data);
+            //console.error('서버 응답:', error.response.status, error.response.data);
             
             // 404 에러 (파일 없음 또는 만료됨)
             if (error.response.status === 404) {
@@ -316,7 +316,7 @@
           } 
           // 연결 문제 (네트워크 등)
           else if (error.request) {
-            console.error('요청 실패:', error.request);
+            //console.error('요청 실패:', error.request);
             errorMessage = '서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요.';
           }
           
@@ -328,7 +328,7 @@
           await axios.delete(`/files/${fileHash}`);
           this.files = this.files.filter(file => file.hash.sha256 !== fileHash);
         } catch (error) {
-          console.error('Error deleting file:', error);
+          //console.error('Error deleting file:', error);
           alert('파일 삭제 중 오류가 발생했습니다.');
         }
       }

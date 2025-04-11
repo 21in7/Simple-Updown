@@ -4,3 +4,4 @@ Dockerfile
 Podfile
 updown/
 docker-compose*
+git.sh
