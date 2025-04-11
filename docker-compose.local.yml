@@ -1,15 +1,12 @@
-
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: file-storage-app-local:latest
+    image: gihyeon21/simple-updown:local
     ports:
       - "9000:9000"
     volumes:
-      - /home/gihyeon/project/file_metadata:/app/file_metadata
-      - /home/gihyeon/project/uploads:/app/uploads
+      - /path/to/dir:/app/uploads
+    environment:
+      - STORAGE_TYPE=local
     restart: unless-stopped
     container_name: file-storage-app-local
     networks:
