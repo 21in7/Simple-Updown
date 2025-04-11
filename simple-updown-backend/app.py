@@ -252,15 +252,20 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
         # 임시 파일 삭제
         os.unlink(temp_file_path)
         
-        # 현재 시간 계산
-        now = datetime.datetime.now()
+        # 시스템 시간 정보 확인
+        import time
+        sys_time = time.strftime('%Y-%m-%d %H:%M:%S')
+        print(f"시스템 현재 시간 (time 모듈): {sys_time}")
+        
+        # 현재 시간 계산 (UTC로 명시)
+        now = datetime.datetime.utcnow()
         
         # 만료 시간 계산
         expire_time = now + timedelta(minutes=expire_in_minutes)
         
         # 시간 디버깅 정보
-        print(f"현재 시간: {now.isoformat()}")
-        print(f"만료 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
+        print(f"현재 UTC 시간: {now.isoformat()}")
+        print(f"만료 UTC 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
         
         # 확장자 확인 및 로깅
         original_filename = file.filename
@@ -278,8 +283,8 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
                 "sha1": sha1_hash,
                 "sha256": file_hash
             },
-            "expire_time": expire_time.isoformat(),  # ISO 포맷으로 저장
-            "date": now.isoformat()
+            "expire_time": expire_time.isoformat() + "Z",  # Z는 UTC 시간임을 나타냄
+            "date": now.isoformat() + "Z"
         }
         
         # 메타데이터 저장 결과 디버깅
@@ -380,8 +385,8 @@ async def delete_file(file_hash: str):
 # 만료된 파일 삭제 함수
 def delete_expired_files():
     expired_docs = []
-    current_time = datetime.datetime.now()
-    print(f"만료 파일 검사 시작 - 현재 시간: {current_time.isoformat()}")
+    current_time = datetime.datetime.utcnow()
+    print(f"만료 파일 검사 시작 - 현재 UTC 시간: {current_time.isoformat()}")
     
     total_count = 0
     expired_count = 0
@@ -397,6 +402,9 @@ def delete_expired_files():
             
         try:
             expire_time_str = metadata.get("expire_time")
+            # 'Z' 접미사를 제거하고 파싱 (필요한 경우)
+            if expire_time_str.endswith('Z'):
+                expire_time_str = expire_time_str[:-1]
             expire_time = datetime.datetime.fromisoformat(expire_time_str)
             
             time_diff = (expire_time - current_time).total_seconds()

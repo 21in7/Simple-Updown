@@ -66,14 +66,17 @@
         // 유효성 검사는 fetchFiles에서 이미 수행했으므로 여기서는 만료 시간만 확인
         return this.files.filter(file => {
           try {
-            const expireTime = new Date(file.expire_time);
-            console.log(`파일 ${file.file_name} 만료 시간:`, file.expire_time, '파싱된 시간:', expireTime.toISOString());
-            console.log(`만료여부 비교 결과:`, expireTime > now, `(${expireTime.getTime()} > ${now.getTime()})`);
-            
-            // 2099년까지의 파일은 일단 모두 표시 (디버깅용)
-            if (expireTime.getFullYear() > 2024) {
-              return true;
+            // UTC 시간 처리
+            let expireTime;
+            if (file.expire_time.endsWith('Z')) {
+              expireTime = new Date(file.expire_time);
+            } else {
+              // Z가 없는 경우 수동으로 UTC 처리
+              expireTime = new Date(file.expire_time + 'Z');
             }
+            
+            console.log(`파일 ${file.file_name} 만료 시간:`, file.expire_time);
+            console.log(`만료여부 비교 결과:`, expireTime > now, `(${expireTime.getTime()} > ${now.getTime()})`);
             
             return expireTime > now;
           } catch (e) {
@@ -141,12 +144,27 @@
       formatDate(dateStr) {
         if (!dateStr) return '';
         try {
-          const date = new Date(dateStr);
-          console.log(`formatDate 원본 문자열: ${dateStr}, 변환된 날짜:`, date);
+          // UTC 시간을 로컬 시간으로 변환
+          console.log(`formatDate 원본 문자열:`, dateStr);
+          
+          // UTC 시간대 처리 (Z가 있으면 UTC)
+          let date;
+          if (dateStr.endsWith('Z')) {
+            date = new Date(dateStr);
+          } else {
+            // Z가 없는 경우 수동으로 UTC 처리
+            date = new Date(dateStr + 'Z');
+          }
+          
+          console.log(`변환된 날짜 객체:`, date);
+          console.log(`로컬 시간으로:`, new Date(date).toLocaleString());
+          
           if (isNaN(date.getTime())) {
             console.error('유효하지 않은 날짜:', dateStr);
             return '날짜 오류';
           }
+          
+          // 로컬 시간으로 포맷팅
           return `${date.getFullYear()}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         } catch (error) {
           console.error('Error formatting date:', error);
@@ -165,7 +183,15 @@
         
         try {
           const now = new Date();
-          const expireTime = new Date(expireTimeStr);
+          
+          // UTC 시간을 처리
+          let expireTime;
+          if (expireTimeStr.endsWith('Z')) {
+            expireTime = new Date(expireTimeStr);
+          } else {
+            // Z가 없는 경우 수동으로 UTC 처리
+            expireTime = new Date(expireTimeStr + 'Z');
+          }
           
           console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
           
