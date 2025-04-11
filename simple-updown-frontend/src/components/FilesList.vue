@@ -51,11 +51,13 @@
         }
       },
       formatFileSize(bytes) {
+        if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
         if (bytes < 1024) return bytes + ' B';
         else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
         else return (bytes / 1048576).toFixed(1) + ' MB';
       },
       formatDate(date) {
+        if (!date) return ''; // date가 undefined일 경우 빈 문자열 변환환
         return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
       },
       async downloadFile(file) {

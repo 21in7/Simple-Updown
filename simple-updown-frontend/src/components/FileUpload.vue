@@ -57,6 +57,13 @@
               this.uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             }
           });
+          if (response.data.success) {
+            this.$router.push({
+              path: '/files/',
+              query: { upload_complete: 'true' }
+            });
+            this.$emit('upload-complete');
+          }
           console.log('파일 업로드 완료:', response.data);
         } catch (error) {
           console.error('Error uploading file:', error);

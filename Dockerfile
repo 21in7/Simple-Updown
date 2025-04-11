@@ -24,8 +24,11 @@ COPY simple-updown-backend/ .
 # Copy built frontend to backend static files
 COPY --from=frontend-builder /app/frontend/dist /app/static
 
+# Create upload directory
+RUN mkdir -p /app/uploads
+
 # Expose API port
 EXPOSE 9000
 
 # Command to run the application
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000", "--reload"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000"]

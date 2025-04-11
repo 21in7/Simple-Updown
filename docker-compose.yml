@@ -10,6 +10,7 @@ services:
     volumes:
       - ./:/app
       - file_metadata:/app/file_metadata
+      - uploads:/app/uploads
     env_file:
       - .env
     restart: unless-stopped
@@ -39,4 +40,5 @@ networks:
 
 volumes:
   file_metadata:
-  minio_data: 
+  minio_data:
+  uploads: 

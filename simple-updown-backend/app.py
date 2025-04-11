@@ -16,17 +16,32 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from database import FileMetadataDB
 from r2_storage import R2Storage
+from local_storage import LocalStorage
+
 try:
     from PIL import Image
 except ImportError:
     print("Pillow not installed, thumbnails will not be available")
     Image = None
 
+# 환경 변수로 스토리지 타입 지정
+storage_type = os.environ.get("STORAGE_TYPE", "local")
+
+# 스토리지 인스턴스 생성
+if storage_type == "local":
+    storage = LocalStorage()
+else:
+    storage = R2Storage()
+
 # Load environment variables
 load_dotenv()
 
 # 파일 크기 포맷팅 함수
 def format_file_size(size_in_bytes):
+    # 유효하지 않은 값 처리
+    if size_in_bytes is None or not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0:
+        return "0 B"
+
     if size_in_bytes < 1024:
         return f"{size_in_bytes} B"
     elif size_in_bytes < 1024 * 1024:
@@ -62,10 +77,44 @@ async def serve_frontend():
 async def list_files():
     return FileResponse('static/index.html')
 
+@app.get("/api/files/")
+async def list_files():
+    files = []
+    for doc_id, metadata in db.list_all().items():
+        file_hash = metadata.get("hash", {}).get("sha256")
+
+        # 파일 존재 여부 확인
+        file_exists = False
+        if storage_type == "local":
+            file_path = os.path.join(storage.upload_dir, file_hash)
+            file_exists = os.path.isfile(file_path)
+        else:
+            # R2 또는 다른 스토리지의 경우
+            file_exists = storage.file_exists(file_hash)
+
+        # 존재하는 파일만 목록에 추가하거나 존재 여부 플래그 포함
+        if file_exists:
+            # 파일 크기가 없거나 형식이 잘못된 경우 수정
+            if "file_size" not in metadata or not isinstance(metadata["file_size"], (int, float)):
+                metadata["file_size"] = 0
+                metadata["formatted_size"] = "0 B"
+
+            files.append(metadata)
+        else:
+            # 존재하지 않는 파일의 메타데이터 삭제
+            db.delete(doc_id)
+    return {"files": files}
+
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
     # Calculate file hash to use as unique identifier
     contents = await file.read()
+
+    # 파일 크기 검증
+    file_size = len(contents)
+    if file_size <= 0:
+        file_size = 0
+
     file_hash = hashlib.sha256(contents).hexdigest()
 
     # Create temporary file
@@ -76,18 +125,26 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
     # Reset file position for subsequent reads
     await file.seek(0)
 
+
+
     # Calculate additional hashes for metadata
     md5_hash = hashlib.md5(contents).hexdigest()
     sha1_hash = hashlib.sha1(contents).hexdigest()
 
-    # Upload to R2
-    r2.upload_file(temp_file_path, file_hash)
+    # Upload Local or R2
+    if storage_type == "local":
+        storage.upload_file(temp_file_path, file_hash)
+    else:
+        r2.upload_file(temp_file_path, file_hash)
 
     # Remove temporary file
     os.unlink(temp_file_path)
 
     # 만료 시간 계산
     expire_time = datetime.datetime.now() + timedelta(minutes=expire_in_minutes)
+
+    # 파일 저장 시간 계산
+    add_time = datetime.datetime.now()
 
     # Store metadata in NoSQL database
     metadata = {
@@ -100,14 +157,17 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
             "sha1": sha1_hash,
             "sha256": file_hash
         },
-        "expire_time": expire_time.isoformat() # ISO 포맷으로 저장장
+        "expire_time": expire_time.isoformat(), # ISO 포맷으로 저장
+        "date": add_time.isoformat()
     }
 
     doc_id = db.insert(metadata)
-
-    # 업로드 완료 후 /files/ 페이지로 리다이렉트
-    response = RedirectResponse(url="/files/?upload_complete=true", status_code=303)
-    return response
+    return {
+        "success": True,
+        "message": "File uploaded successfully.",
+        "redirect_to": "/files/",
+        "file_info": metadata
+    }
 
 @app.get("/download/{file_hash}")
 async def download_file(file_hash: str):

@@ -4,6 +4,7 @@
 import json
 import os
 import uuid
+import datetime
 
 class FileMetadataDB:
     def __init__(self, filename='file_metadata.json'):
@@ -25,6 +26,12 @@ class FileMetadataDB:
     def insert(self, metadata):
         # Generate unique ID and store metadata
         doc_id = str(uuid.uuid4())
+
+        # Convert datetime objects to ISO format strings
+        #for key, value in metadata.items():
+        #    if isinstance(value, datetime.datetime):
+        #        metadata[key] = value.isoformat()
+
         self.store[doc_id] = metadata
         self.save()
         return doc_id
