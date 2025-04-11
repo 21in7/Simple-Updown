@@ -9,8 +9,8 @@ import pyshorteners
 import io
 from datetime import timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
-from fastapi.responses import StreamingResponse, HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
@@ -40,7 +40,6 @@ app = FastAPI(title="File Storage Service")
 db = FileMetadataDB()
 r2 = R2Storage()
 
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -49,11 +48,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-templates = Jinja2Templates(directory="templates")
+# 정적 파일 제공
 
-@app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+async def serve_frontend():
+    return FileResponse('static/index.html')
+
+@app.get("/files/")
+async def list_files():
+    return FileResponse('static/index.html')
 
 @app.post("/upload/")
 async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
@@ -127,11 +132,6 @@ async def download_file(file_hash: str):
                 )
     
     raise HTTPException(status_code=404, detail="File not found")
-
-@app.get("/files/", response_class=HTMLResponse)
-async def list_files(request: Request, upload_complete: bool = False):
-    files = db.list_all()
-    return templates.TemplateResponse("files.html", {"request": request, "files": files, "upload_complete": upload_complete})
 
 @app.delete("/files/{file_hash}")
 async def delete_file(file_hash: str):
