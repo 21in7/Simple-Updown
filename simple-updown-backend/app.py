@@ -252,11 +252,15 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
         # 임시 파일 삭제
         os.unlink(temp_file_path)
         
-        # 만료 시간 계산
-        expire_time = datetime.datetime.now() + timedelta(minutes=expire_in_minutes)
+        # 현재 시간 계산
+        now = datetime.datetime.now()
         
-        # 파일 저장 시간 계산
-        add_time = datetime.datetime.now()
+        # 만료 시간 계산
+        expire_time = now + timedelta(minutes=expire_in_minutes)
+        
+        # 시간 디버깅 정보
+        print(f"현재 시간: {now.isoformat()}")
+        print(f"만료 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
         
         # 확장자 확인 및 로깅
         original_filename = file.filename
@@ -275,11 +279,12 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
                 "sha256": file_hash
             },
             "expire_time": expire_time.isoformat(),  # ISO 포맷으로 저장
-            "date": add_time.isoformat()
+            "date": now.isoformat()
         }
         
         # 메타데이터 저장 결과 디버깅
         print(f"저장된 메타데이터: file_name={metadata['file_name']}, size={metadata['file_size']}, content_type={metadata['content_type']}")
+        print(f"저장된 날짜: date={metadata['date']}, expire_time={metadata['expire_time']}")
         
         doc_id = db.insert(metadata)
         
@@ -376,23 +381,40 @@ async def delete_file(file_hash: str):
 def delete_expired_files():
     expired_docs = []
     current_time = datetime.datetime.now()
+    print(f"만료 파일 검사 시작 - 현재 시간: {current_time.isoformat()}")
+    
+    total_count = 0
+    expired_count = 0
+    error_count = 0
     
     for doc_id, metadata in db.list_all().items():
+        total_count += 1
         if "expire_time" not in metadata:
             expired_docs.append(doc_id)
+            error_count += 1
+            print(f"만료 시간 필드 없음: {doc_id}")
             continue
             
         try:
-            expire_time = datetime.datetime.fromisoformat(metadata.get("expire_time"))
+            expire_time_str = metadata.get("expire_time")
+            expire_time = datetime.datetime.fromisoformat(expire_time_str)
+            
+            time_diff = (expire_time - current_time).total_seconds()
+            print(f"파일 {metadata.get('file_name', 'unknown')} 만료 시간: {expire_time_str}, 시간차: {time_diff}초")
+            
             if current_time > expire_time:
+                expired_count += 1
                 file_hash = metadata.get("hash", {}).get("sha256")
                 if file_hash:
+                    print(f"만료된 파일 삭제: {metadata.get('file_name', 'unknown')}, 해시: {file_hash}")
                     if storage_type == "local":
                         storage.delete_file(file_hash)
                     else:
                         r2.delete_file(file_hash)
                 expired_docs.append(doc_id)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            error_count += 1
+            print(f"날짜 형식 오류: {doc_id}, 오류: {str(e)}, 값: {metadata.get('expire_time', 'none')}")
             # 날짜 형식이 잘못된 경우 해당 항목 삭제
             expired_docs.append(doc_id)
     
@@ -400,6 +422,7 @@ def delete_expired_files():
     for doc_id in expired_docs:
         db.delete(doc_id)
     
+    print(f"만료 파일 검사 완료 - 전체: {total_count}, 만료됨: {expired_count}, 오류: {error_count}")
     if expired_docs:
         print(f"{len(expired_docs)}개의 만료된 파일 삭제됨")
 

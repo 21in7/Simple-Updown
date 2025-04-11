@@ -1,6 +1,12 @@
 <template>
     <div class="files-container">
       <h2>파일 목록</h2>
+      <!-- 디버깅 정보 표시 -->
+      <div class="debug-info">
+        <p>총 파일 수: {{ files.length }}</p>
+        <p>필터링 후 파일 수: {{ filteredFiles.length }}</p>
+      </div>
+      
       <div v-if="loading" class="loading">로딩 중...</div>
       <div v-else-if="filteredFiles.length === 0" class="no-files">
         업로드된 파일이 없습니다.
@@ -55,10 +61,20 @@
     computed: {
       filteredFiles() {
         const now = new Date();
+        console.log('현재 시간:', now.toISOString());
+        
         // 유효성 검사는 fetchFiles에서 이미 수행했으므로 여기서는 만료 시간만 확인
         return this.files.filter(file => {
           try {
             const expireTime = new Date(file.expire_time);
+            console.log(`파일 ${file.file_name} 만료 시간:`, file.expire_time, '파싱된 시간:', expireTime.toISOString());
+            console.log(`만료여부 비교 결과:`, expireTime > now, `(${expireTime.getTime()} > ${now.getTime()})`);
+            
+            // 2099년까지의 파일은 일단 모두 표시 (디버깅용)
+            if (expireTime.getFullYear() > 2024) {
+              return true;
+            }
+            
             return expireTime > now;
           } catch (e) {
             console.error('만료 시간 파싱 오류:', e, file);
@@ -126,11 +142,15 @@
         if (!dateStr) return '';
         try {
           const date = new Date(dateStr);
-          if (isNaN(date.getTime())) return '';
-          return `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+          console.log(`formatDate 원본 문자열: ${dateStr}, 변환된 날짜:`, date);
+          if (isNaN(date.getTime())) {
+            console.error('유효하지 않은 날짜:', dateStr);
+            return '날짜 오류';
+          }
+          return `${date.getFullYear()}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
         } catch (error) {
           console.error('Error formatting date:', error);
-          return '';
+          return '날짜 오류';
         }
       },
       isExpiringSoon(expireTimeStr) {
@@ -143,22 +163,31 @@
       getTimeLeft(expireTimeStr) {
         if (!expireTimeStr) return '';
         
-        const now = new Date();
-        const expireTime = new Date(expireTimeStr);
-        const diffMs = expireTime - now;
-        
-        if (diffMs <= 0) return '만료됨';
-        
-        const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
-        const diffHours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-        const diffMinutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
-        
-        if (diffDays > 0) {
-          return `${diffDays}일 ${diffHours}시간 남음`;
-        } else if (diffHours > 0) {
-          return `${diffHours}시간 ${diffMinutes}분 남음`;
-        } else {
-          return `${diffMinutes}분 남음`;
+        try {
+          const now = new Date();
+          const expireTime = new Date(expireTimeStr);
+          
+          console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
+          
+          const diffMs = expireTime - now;
+          console.log(`시간차이(ms): ${diffMs}`);
+          
+          if (diffMs <= 0) return '만료됨';
+          
+          const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
+          const diffHours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+          const diffMinutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
+          
+          if (diffDays > 0) {
+            return `${diffDays}일 ${diffHours}시간 남음`;
+          } else if (diffHours > 0) {
+            return `${diffHours}시간 ${diffMinutes}분 남음`;
+          } else {
+            return `${diffMinutes}분 남음`;
+          }
+        } catch (error) {
+          console.error('Error calculating time left:', error);
+          return '시간 계산 오류';
         }
       },
       async downloadFile(file) {
