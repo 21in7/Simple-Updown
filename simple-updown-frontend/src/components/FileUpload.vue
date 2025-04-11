@@ -90,6 +90,13 @@ export default {
     async uploadFile() {
       if (!this.selectedFile) return;
       
+      // 디버깅 로그 추가
+      console.log('업로드 시작할 파일:', {
+        name: this.selectedFile.name,
+        type: this.selectedFile.type,
+        size: this.selectedFile.size
+      });
+      
       const formData = new FormData();
       formData.append('file', this.selectedFile);
       formData.append('expire_in_minutes', this.expirationMinutes);
@@ -103,16 +110,25 @@ export default {
             this.uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
           }
         });
+        
+        // 업로드 응답 로깅
+        console.log('업로드 응답:', response.data);
+        
         if (response.data.success) {
-          this.$router.push({
-            path: '/files/',
-            query: { upload_complete: 'true' }
-          });
-          this.$emit('upload-complete');
+          // 파일 목록 페이지로 이동하기 전에 500ms 지연
+          setTimeout(() => {
+            this.$router.push({
+              path: '/files/',
+              query: { upload_complete: 'true' }
+            });
+            this.$emit('upload-complete');
+          }, 500);
         }
-        console.log('파일 업로드 완료:', response.data);
       } catch (error) {
         console.error('Error uploading file:', error);
+        if (error.response) {
+          console.error('서버 응답:', error.response.data);
+        }
       }
     }
   }

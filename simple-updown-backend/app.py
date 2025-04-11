@@ -135,12 +135,21 @@ def cleanup_orphaned_files():
 @app.get("/api/files/")
 async def list_files():
     files = []
+    file_count = 0
+    valid_count = 0
+    deleted_count = 0
+    
+    print("파일 목록 API 호출됨")
+    
     for doc_id, metadata in db.list_all().items():
+        file_count += 1
         file_hash = metadata.get("hash", {}).get("sha256")
         
         # 파일 해시가 없으면 항목을 삭제하고 건너뜁니다
         if not file_hash:
             db.delete(doc_id)
+            deleted_count += 1
+            print(f"파일 삭제: 해시 없음 - {doc_id}")
             continue
             
         # 파일 존재 여부 확인
@@ -158,20 +167,52 @@ async def list_files():
             if "file_size" not in metadata or not isinstance(metadata["file_size"], (int, float)) or metadata["file_size"] <= 0:
                 # 파일 크기가 0 이하면 항목 삭제하고 건너뜁니다
                 db.delete(doc_id)
+                deleted_count += 1
+                print(f"파일 삭제: 크기 오류 - {doc_id}")
                 continue
             
             # 파일명이 없는 경우 처리
             if "file_name" not in metadata or not metadata["file_name"]:
                 # 파일명이 없으면 항목 삭제하고 건너뜁니다
                 db.delete(doc_id)
+                deleted_count += 1
+                print(f"파일 삭제: 파일명 없음 - {doc_id}")
                 continue
+            
+            # 파일명에 확장자 표시 확인
+            file_name = metadata.get("file_name", "")
+            if "." not in file_name:
+                print(f"경고: 확장자 없는 파일명 - {file_name}")
+                
+                # 컨텐츠 타입에서 확장자 추론 시도
+                content_type = metadata.get("content_type", "")
+                extension = ""
+                
+                if "image/jpeg" in content_type:
+                    extension = ".jpg"
+                elif "image/png" in content_type:
+                    extension = ".png"
+                elif "application/pdf" in content_type:
+                    extension = ".pdf"
+                elif "text/plain" in content_type:
+                    extension = ".txt"
+                
+                # 확장자 추가
+                if extension and not file_name.endswith(extension):
+                    metadata["file_name"] = file_name + extension
+                    db.update(doc_id, metadata)
+                    print(f"파일명 수정: {file_name} -> {metadata['file_name']}")
             
             # 유효한 파일 항목만 목록에 추가
             files.append(metadata)
+            valid_count += 1
         else:
             # 존재하지 않는 파일의 메타데이터 삭제
             db.delete(doc_id)
+            deleted_count += 1
+            print(f"파일 삭제: 실제 파일 없음 - {doc_id}")
     
+    print(f"파일 목록 결과: 전체 {file_count}개, 유효 {valid_count}개, 삭제됨 {deleted_count}개")
     return {"files": files}
 
 @app.post("/upload/")
@@ -179,6 +220,9 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
     # 파일 크기 확인 (0 바이트 파일 체크)
     contents = await file.read()
     file_size = len(contents)
+    
+    # 디버깅 로그 추가
+    print(f"업로드 받은 파일명: {file.filename}")
     
     if file_size <= 0:
         raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
@@ -214,9 +258,14 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
         # 파일 저장 시간 계산
         add_time = datetime.datetime.now()
         
+        # 확장자 확인 및 로깅
+        original_filename = file.filename
+        if "." not in original_filename:
+            print(f"경고: 파일명에 확장자가 없습니다 - {original_filename}")
+        
         # 메타데이터 저장
         metadata = {
-            "file_name": file.filename,
+            "file_name": original_filename,
             "file_size": file_size,
             "formatted_size": format_file_size(file_size),
             "content_type": file.content_type,
@@ -228,6 +277,9 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
             "expire_time": expire_time.isoformat(),  # ISO 포맷으로 저장
             "date": add_time.isoformat()
         }
+        
+        # 메타데이터 저장 결과 디버깅
+        print(f"저장된 메타데이터: file_name={metadata['file_name']}, size={metadata['file_size']}, content_type={metadata['content_type']}")
         
         doc_id = db.insert(metadata)
         

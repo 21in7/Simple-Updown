@@ -55,15 +55,16 @@
     computed: {
       filteredFiles() {
         const now = new Date();
-        return this.files.filter(file => 
-          file && 
-          file.file_size > 0 && 
-          file.file_name && 
-          file.hash && 
-          file.hash.sha256 &&
-          // 만료되지 않은 파일만 표시
-          new Date(file.expire_time) > now
-        );
+        // 유효성 검사는 fetchFiles에서 이미 수행했으므로 여기서는 만료 시간만 확인
+        return this.files.filter(file => {
+          try {
+            const expireTime = new Date(file.expire_time);
+            return expireTime > now;
+          } catch (e) {
+            console.error('만료 시간 파싱 오류:', e, file);
+            return false;
+          }
+        });
       }
     },
     mounted() {
@@ -84,7 +85,26 @@
         try {
           const response = await axios.get('/api/files/');
           if (response.data && response.data.files) {
-            this.files = response.data.files;
+            // 디버깅: 서버로부터 받은 원본 파일 목록
+            console.log('서버에서 받은 파일 목록:', response.data.files);
+            
+            // 유효하지 않은 파일은 필터링하여 제외
+            this.files = response.data.files.filter(file => {
+              const isValid = file && 
+                file.file_name && 
+                file.file_size > 0 &&
+                file.hash && 
+                file.hash.sha256;
+              
+              if (!isValid) {
+                console.warn('유효하지 않은 파일 제외:', file);
+              }
+              
+              return isValid;
+            });
+            
+            // 필터링 후 남은 파일 목록
+            console.log('필터링 후 파일 목록:', this.files);
           } else {
             this.files = [];
             console.error('Invalid response format:', response.data);
