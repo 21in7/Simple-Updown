@@ -62,3 +62,20 @@ class R2Storage:
         except ClientError as e:
             print(f"Error deleting file: {e}")
             return False
+
+    def get_file_bytes(self, object_name):
+        # Get file from R2 as bytes
+        try:
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=object_name)
+            return response['Body'].read()
+        except ClientError as e:
+            print(f"Error getting file bytes: {e}")
+            return None
+            
+    def file_exists(self, object_name):
+        # Check if file exists in R2 bucket
+        try:
+            self.s3_client.head_object(Bucket=self.bucket_name, Key=object_name)
+            return True
+        except ClientError:
+            return False

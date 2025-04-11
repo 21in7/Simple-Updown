@@ -320,46 +320,74 @@ async def download_file(file_hash: str):
     if not file_metadata:
         raise HTTPException(status_code=404, detail="File not found")
     
-    # 만료 시간 확인
-    expire_time = datetime.datetime.fromisoformat(file_metadata.get("expire_time"))
-    if datetime.datetime.now() > expire_time:
-        # 파일 삭제
-        if storage_type == "local":
-            storage.delete_file(file_hash)
-        else:
-            r2.delete_file(file_hash)
+    # 만료 시간 확인 (UTC 시간 사용)
+    expire_time_str = file_metadata.get("expire_time")
+    
+    # 디버깅 정보 출력
+    print(f"파일 다운로드 요청: {file_hash}, 파일명: {file_metadata.get('file_name', 'unknown')}")
+    print(f"만료 시간 문자열: {expire_time_str}")
+    
+    try:
+        # 'Z' 접미사 처리
+        if expire_time_str.endswith('Z'):
+            expire_time_str = expire_time_str[:-1]
         
-        db.delete(doc_id)
-        raise HTTPException(status_code=404, detail="File expired and deleted")
+        expire_time = datetime.datetime.fromisoformat(expire_time_str)
+        current_time = datetime.datetime.utcnow()
+        
+        print(f"현재 UTC 시간: {current_time.isoformat()}, 파싱된 만료 시간: {expire_time.isoformat()}")
+        print(f"만료 비교 결과: {current_time > expire_time}")
+        
+        if current_time > expire_time:
+            # 파일 삭제
+            print(f"파일 만료됨, 삭제 진행: {file_hash}")
+            if storage_type == "local":
+                storage.delete_file(file_hash)
+            else:
+                r2.delete_file(file_hash)
+            
+            db.delete(doc_id)
+            raise HTTPException(status_code=404, detail="File expired and deleted")
+            
+    except Exception as e:
+        print(f"만료 시간 처리 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing expiration time: {str(e)}")
     
     # 파일 스트림 가져오기
-    file_stream = None
-    if storage_type == "local":
-        file_path = os.path.join(storage.upload_dir, file_hash)
-        if os.path.exists(file_path):
-            return FileResponse(
-                file_path,
-                media_type="application/octet-stream",
-                filename=file_metadata['file_name']
-            )
+    try:
+        if storage_type == "local":
+            file_path = os.path.join(storage.upload_dir, file_hash)
+            if os.path.exists(file_path):
+                print(f"로컬 스토리지에서 파일 반환: {file_path}")
+                return FileResponse(
+                    file_path,
+                    media_type="application/octet-stream",
+                    filename=file_metadata['file_name']
+                )
+            else:
+                # 메타데이터는 있지만 파일이 없는 경우
+                print(f"로컬 스토리지에 파일 없음: {file_path}")
+                db.delete(doc_id)
+                raise HTTPException(status_code=404, detail="File not found")
         else:
-            # 메타데이터는 있지만 파일이 없는 경우
-            db.delete(doc_id)
-            raise HTTPException(status_code=404, detail="File not found")
-    else:
-        file_stream = r2.get_file_stream(file_hash)
-        
-        if file_stream:
-            # 파일을 스트리밍 응답으로 반환
-            return StreamingResponse(
-                file_stream,
-                media_type="application/octet-stream",
-                headers={"Content-Disposition": f"attachment; filename={file_metadata['file_name']}"}
-            )
-        else:
-            # 메타데이터는 있지만 파일이 없는 경우
-            db.delete(doc_id)
-            raise HTTPException(status_code=404, detail="File not found")
+            print(f"R2 스토리지에서 파일 가져오기: {file_hash}")
+            file_stream = r2.get_file_stream(file_hash)
+            
+            if file_stream:
+                # 파일을 스트리밍 응답으로 반환
+                return StreamingResponse(
+                    file_stream,
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": f"attachment; filename={file_metadata['file_name']}"}
+                )
+            else:
+                # 메타데이터는 있지만 파일이 없는 경우
+                print(f"R2 스토리지에 파일 없음: {file_hash}")
+                db.delete(doc_id)
+                raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        print(f"파일 다운로드 중 오류 발생: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
 
 @app.delete("/files/{file_hash}")
 async def delete_file(file_hash: str):
@@ -439,3 +467,86 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(delete_expired_files, 'interval', minutes=1)
 scheduler.add_job(cleanup_orphaned_files, 'interval', hours=1)  # 정기적으로 고아 파일 정리
 scheduler.start()
+
+# 파일 확장자로 이미지 확인
+def is_image_file(filename):
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+    ext = os.path.splitext(filename.lower())[1]
+    return ext in image_extensions
+
+# 파일 컨텐츠 타입으로 이미지 확인
+def is_image_content_type(content_type):
+    return content_type and content_type.startswith('image/')
+
+@app.get("/thumbnail/{file_hash}")
+async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
+    # Pillow 라이브러리가 없으면 썸네일 생성 불가
+    if Image is None:
+        raise HTTPException(status_code=400, detail="Thumbnail generation not available - Pillow not installed")
+    
+    # 파일 메타데이터 검색
+    file_metadata = None
+    
+    for _, metadata in db.list_all().items():
+        if metadata.get("hash", {}).get("sha256") == file_hash:
+            file_metadata = metadata
+            break
+    
+    if not file_metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # 이미지 파일이 아니면 에러 반환
+    file_name = file_metadata.get("file_name", "")
+    content_type = file_metadata.get("content_type", "")
+    
+    if not (is_image_file(file_name) or is_image_content_type(content_type)):
+        raise HTTPException(status_code=400, detail="Not an image file")
+    
+    # 이미지 파일 읽기
+    img_data = None
+    img_format = "JPEG"  # 기본 포맷
+    
+    if storage_type == "local":
+        file_path = os.path.join(storage.upload_dir, file_hash)
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as f:
+                    img_data = f.read()
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error reading file: {str(e)}")
+    else:
+        # R2에서 파일 가져오기
+        try:
+            img_data = r2.get_file_bytes(file_hash)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error reading file from R2: {str(e)}")
+    
+    if not img_data:
+        raise HTTPException(status_code=404, detail="Image data not found")
+    
+    # 이미지 확장자에 따라 포맷 결정
+    if file_name.lower().endswith('.png'):
+        img_format = "PNG"
+    elif file_name.lower().endswith('.gif'):
+        img_format = "GIF"
+    
+    # 썸네일 생성
+    try:
+        img = Image.open(io.BytesIO(img_data))
+        img.thumbnail((width, height))
+        
+        # 썸네일을 메모리에 저장
+        thumbnail_io = io.BytesIO()
+        img.save(thumbnail_io, format=img_format)
+        thumbnail_io.seek(0)
+        
+        # 적절한 MIME 타입 설정
+        mime_type = "image/jpeg"
+        if img_format == "PNG":
+            mime_type = "image/png"
+        elif img_format == "GIF":
+            mime_type = "image/gif"
+        
+        return StreamingResponse(thumbnail_io, media_type=mime_type)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")

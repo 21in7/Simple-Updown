@@ -44,3 +44,22 @@ class LocalStorage:
     def get_file_url(self, file_name):
         """파일 URL 생성"""
         return f"/files/{file_name}"
+
+    def file_exists(self, file_name):
+        """파일 존재 여부 확인"""
+        file_path = os.path.join(self.upload_dir, file_name)
+        return os.path.exists(file_path) and os.path.isfile(file_path)
+
+    def get_file_bytes(self, file_name):
+        """파일을 바이트로 읽어오기"""
+        file_path = os.path.join(self.upload_dir, file_name)
+        if not os.path.exists(file_path) or not os.path.isfile(file_path):
+            print(f"파일이 존재하지 않음: {file_path}")
+            return None
+        
+        try:
+            with open(file_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            print(f"파일 읽기 오류: {file_path} - {str(e)}")
+            return None

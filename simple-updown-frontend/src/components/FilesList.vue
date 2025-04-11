@@ -15,6 +15,7 @@
         <table class="files-table">
           <thead>
             <tr>
+              <th class="file-preview-header">미리보기</th>
               <th class="file-name-header">파일명</th>
               <th class="file-size-header">크기</th>
               <th class="file-date-header">업로드 날짜</th>
@@ -24,6 +25,13 @@
           </thead>
           <tbody>
             <tr v-for="file in filteredFiles" :key="file.hash.sha256" class="file-row">
+              <td class="file-preview-cell">
+                <img v-if="isImageFile(file.file_name)" :src="getThumbnailUrl(file.hash.sha256)" 
+                  class="file-thumbnail" alt="썸네일" @error="onThumbnailError" />
+                <div v-else class="file-icon">
+                  {{ getFileIcon(file.file_name) }}
+                </div>
+              </td>
               <td class="file-name-cell">{{ file.file_name }}</td>
               <td class="file-size-cell">{{ file.formatted_size || formatFileSize(file.file_size) }}</td>
               <td class="file-date-cell">{{ formatDate(file.date) }}</td>
@@ -135,6 +143,41 @@
           this.loading = false;
         }
       },
+      // 이미지 파일인지 확인
+      isImageFile(filename) {
+        if (!filename) return false;
+        const lowerFilename = filename.toLowerCase();
+        return lowerFilename.endsWith('.jpg') || 
+               lowerFilename.endsWith('.jpeg') || 
+               lowerFilename.endsWith('.png') || 
+               lowerFilename.endsWith('.gif') || 
+               lowerFilename.endsWith('.webp') || 
+               lowerFilename.endsWith('.bmp');
+      },
+      // 썸네일 URL 가져오기
+      getThumbnailUrl(fileHash) {
+        return `/thumbnail/${fileHash}?width=80&height=80`;
+      },
+      // 파일 아이콘 가져오기
+      getFileIcon(filename) {
+        if (!filename) return '📄';
+        
+        const lowerFilename = filename.toLowerCase();
+        if (this.isImageFile(lowerFilename)) return '🖼️';
+        if (lowerFilename.endsWith('.pdf')) return '📕';
+        if (lowerFilename.endsWith('.doc') || lowerFilename.endsWith('.docx')) return '📝';
+        if (lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.xlsx')) return '📊';
+        if (lowerFilename.endsWith('.ppt') || lowerFilename.endsWith('.pptx')) return '📊';
+        if (lowerFilename.endsWith('.zip') || lowerFilename.endsWith('.rar')) return '🗜️';
+        if (lowerFilename.endsWith('.txt')) return '📄';
+        
+        return '📁';
+      },
+      // 썸네일 로드 실패 시 처리
+      onThumbnailError(event) {
+        event.target.style.display = 'none';
+        event.target.nextElementSibling.style.display = 'block';
+      },
       formatFileSize(bytes) {
         if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
         if (bytes < 1024) return bytes + ' B';
@@ -174,7 +217,16 @@
       isExpiringSoon(expireTimeStr) {
         if (!expireTimeStr) return false;
         const now = new Date();
-        const expireTime = new Date(expireTimeStr);
+        
+        // UTC 시간 처리
+        let expireTime;
+        if (expireTimeStr.endsWith('Z')) {
+          expireTime = new Date(expireTimeStr);
+        } else {
+          // Z가 없는 경우 수동으로 UTC 처리
+          expireTime = new Date(expireTimeStr + 'Z');
+        }
+        
         // 24시간 이내에 만료되는 경우 강조 표시
         return (expireTime - now) < 24 * 60 * 60 * 1000;
       },
@@ -218,25 +270,57 @@
       },
       async downloadFile(file) {
         try {
-          const response = await axios.get(`/download/${file.hash.sha256}`, { responseType: 'blob' });
-          const url = window.URL.createObjectURL(new Blob([response.data]));
+          console.log(`파일 다운로드 요청: ${file.file_name}, 해시: ${file.hash.sha256}`);
+          
+          const response = await axios.get(`/download/${file.hash.sha256}`, { 
+            responseType: 'blob',
+            timeout: 30000 // 30초 타임아웃 설정
+          });
+          
+          console.log('다운로드 응답 성공:', response.status, response.headers);
+          
+          const contentType = response.headers['content-type'] || 'application/octet-stream';
+          const url = window.URL.createObjectURL(new Blob([response.data], { type: contentType }));
           const link = document.createElement('a');
           link.href = url;
           link.setAttribute('download', file.file_name);
           document.body.appendChild(link);
           link.click();
-          document.body.removeChild(link);
+          
+          // 정리
+          setTimeout(() => {
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+          }, 100);
+          
+          console.log('파일 다운로드 완료');
         } catch (error) {
           console.error('Error downloading file:', error);
           
-          // 파일이 이미 만료된 경우 (404)
-          if (error.response && error.response.status === 404) {
-            alert('파일이 만료되어 더 이상 다운로드할 수 없습니다.');
-            // 목록에서 제거
-            this.files = this.files.filter(f => f.hash.sha256 !== file.hash.sha256);
-          } else {
-            alert('파일 다운로드 중 오류가 발생했습니다.');
+          let errorMessage = '파일 다운로드 중 오류가 발생했습니다.';
+          
+          // 상태 코드에 따른 오류 메시지
+          if (error.response) {
+            console.error('서버 응답:', error.response.status, error.response.data);
+            
+            // 404 에러 (파일 없음 또는 만료됨)
+            if (error.response.status === 404) {
+              errorMessage = '파일이 만료되었거나 존재하지 않습니다.';
+              // 목록에서 제거
+              this.files = this.files.filter(f => f.hash.sha256 !== file.hash.sha256);
+            } 
+            // 500 에러 (서버 내부 오류)
+            else if (error.response.status === 500) {
+              errorMessage = '서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+            }
+          } 
+          // 연결 문제 (네트워크 등)
+          else if (error.request) {
+            console.error('요청 실패:', error.request);
+            errorMessage = '서버에 연결할 수 없습니다. 네트워크 연결을 확인해주세요.';
           }
+          
+          alert(errorMessage);
         }
       },
       async deleteFile(fileHash) {
@@ -305,6 +389,32 @@ h2 {
   background-color: #f9f9f9;
 }
 
+.file-preview-cell {
+  width: 80px;
+  text-align: center;
+}
+
+.file-thumbnail {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  background-color: #f9f9f9;
+}
+
+.file-icon {
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+}
+
 .file-name-cell {
   max-width: 300px;
   overflow: hidden;
@@ -369,5 +479,13 @@ h2 {
 
 .delete:hover {
   background-color: #d32f2f;
+}
+
+.debug-info {
+  margin-bottom: 20px;
+  padding: 10px;
+  background-color: #f0f0f0;
+  border-radius: 5px;
+  font-size: 14px;
 }
 </style>
