@@ -54,5 +54,5 @@ Edit the .env file with your preferred settings.
 - `templates/`: HTML templates
 
 
-### Favicon Made For Microsoft Designer Service
+## Favicon Made For Microsoft Designer Service
 https://designer.microsoft.com/
