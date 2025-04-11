@@ -52,3 +52,7 @@ Edit the .env file with your preferred settings.
 - `simple-updown-frontend/`: Vue.js frontend application
 - `simple-updown-backend/`: Python backend service
 - `templates/`: HTML templates
+
+
+### Favicon Made For Microsoft Designer Service
+https://designer.microsoft.com/
