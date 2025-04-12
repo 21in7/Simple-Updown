@@ -53,7 +53,7 @@ jobs:
         platforms: linux/amd64,linux/arm64
         tags: |
           ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:latest
-          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:local
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:local-latest
           ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-local
         build-args: |
           STORAGE_TYPE=local
@@ -68,7 +68,7 @@ jobs:
         push: true
         platforms: linux/amd64,linux/arm64
         tags: |
-          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:r2
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:r2-latest
           ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-r2
         build-args: |
           STORAGE_TYPE=r2
