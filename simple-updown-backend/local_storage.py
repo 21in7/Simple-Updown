@@ -51,15 +51,63 @@ class LocalStorage:
         return os.path.exists(file_path) and os.path.isfile(file_path)
 
     def get_file_bytes(self, file_name):
-        """파일을 바이트로 읽어오기"""
-        file_path = os.path.join(self.upload_dir, file_name)
-        if not os.path.exists(file_path) or not os.path.isfile(file_path):
-            print(f"파일이 존재하지 않음: {file_path}")
-            return None
-        
+        """
+        파일을 읽어 바이트로 반환합니다.
+        메모리 사용량이 중요한 경우 stream_file 메서드를 사용하는 것이 좋습니다.
+        """
         try:
-            with open(file_path, 'rb') as f:
+            file_path = os.path.join(self.upload_dir, file_name)
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                print(f"파일을 찾을 수 없음: {file_path}")
+                return None
+                
+            with open(file_path, "rb") as f:
                 return f.read()
         except Exception as e:
-            print(f"파일 읽기 오류: {file_path} - {str(e)}")
+            print(f"파일 읽기 오류: {str(e)}")
             return None
+    
+    def stream_file(self, file_name, chunk_size=1024 * 1024):
+        """
+        파일을 청크 단위로 스트리밍합니다.
+        메모리 사용량을 최소화하기 위해 제네레이터를 사용합니다.
+        """
+        try:
+            file_path = os.path.join(self.upload_dir, file_name)
+            if not os.path.exists(file_path) or not os.path.isfile(file_path):
+                print(f"스트리밍할 파일을 찾을 수 없음: {file_path}")
+                return None
+                
+            with open(file_path, "rb") as f:
+                while True:
+                    chunk = f.read(chunk_size)
+                    if not chunk:
+                        break
+                    yield chunk
+        except Exception as e:
+            print(f"파일 스트리밍 오류: {str(e)}")
+            return None
+    
+    def save_file(self, file_name, file_content):
+        """파일 저장하기"""
+        try:
+            file_path = os.path.join(self.upload_dir, file_name)
+            with open(file_path, "wb") as f:
+                f.write(file_content)
+            return True
+        except Exception as e:
+            print(f"파일 저장 오류: {str(e)}")
+            return False
+    
+    def save_file_stream(self, file_name, file_stream):
+        """
+        스트림에서 파일 저장하기 (메모리 효율적)
+        """
+        try:
+            file_path = os.path.join(self.upload_dir, file_name)
+            with open(file_path, "wb") as output_file:
+                shutil.copyfileobj(file_stream, output_file)
+            return True
+        except Exception as e:
+            print(f"스트림에서 파일 저장 오류: {str(e)}")
+            return False
