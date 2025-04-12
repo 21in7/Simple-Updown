@@ -2,6 +2,22 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+import time
+import gc
+
+def format_file_size(size_in_bytes):
+    """파일 크기를 사람이 읽기 쉬운 형식으로 변환"""
+    if size_in_bytes is None or not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0:
+        return "0 B"
+
+    if size_in_bytes < 1024:
+        return f"{size_in_bytes} B"
+    elif size_in_bytes < 1024 * 1024:
+        return f"{size_in_bytes / 1024:.2f} KB"
+    elif size_in_bytes < 1024 * 1024 * 1024:
+        return f"{size_in_bytes / (1024 * 1024):.2f} MB"
+    else:
+        return f"{size_in_bytes / (1024 * 1024 * 1024):.2f} GB"
 
 class LocalStorage:
     def __init__(self, upload_dir="/app/uploads"):
@@ -10,58 +26,137 @@ class LocalStorage:
         os.makedirs(upload_dir, exist_ok=True)
 
     def upload_file(self, file_obj, file_name):
-        """로컬 파일 시스템에 파일 업로드 (메모리 최적화)"""
+        """로컬 파일 시스템에 파일 업로드 (완전 스트리밍 방식)"""
         destination = os.path.join(self.upload_dir, file_name)
         
-        # 문자열 경로인 경우 (최적화된 처리)
-        if isinstance(file_obj, str) and os.path.isfile(file_obj):
-            # 메모리 최적화: 파일을 복사하는 대신 이동 (임시 파일의 경우)
-            if file_obj.startswith(tempfile.gettempdir()):
-                try:
-                    shutil.move(file_obj, destination)
-                    return True
-                except (shutil.Error, OSError):
-                    # 이동 실패시 복사로 대체
-                    shutil.copy2(file_obj, destination)
-                    return True
-            else:
-                # 임시 디렉토리가 아닌 경우 안전하게 복사
-                shutil.copy2(file_obj, destination)
-                return True
-        
-        # 파일 객체인 경우
         try:
-            # 파일 객체 유형 식별
-            if hasattr(file_obj, 'file'):
-                # UploadFile 객체인 경우 내부 파일 객체 사용
-                file_to_copy = file_obj.file
-            elif hasattr(file_obj, 'read'):
-                # 일반 파일 객체인 경우
-                file_to_copy = file_obj
-            else:
-                # 처리할 수 없는 유형
-                raise ValueError(f"지원되지 않는 파일 객체 유형: {type(file_obj)}")
+            # 목적지 파일이 이미 존재하는지 확인
+            if os.path.exists(destination):
+                print(f"중복 파일 발견: {destination}, 덮어쓰기")
+                os.remove(destination)
             
-            # 메모리 최적화: 대용량 파일 스트리밍을 위한 작은 청크 사용
-            with open(destination, 'wb') as dest_file:
-                # 파일 포인터를 처음으로 되돌림
-                file_to_copy.seek(0)
-                # 청크 단위로 복사 (버퍼 크기 조정)
-                chunk_size = 1024 * 1024  # 1MB 청크
-                while True:
-                    chunk = file_to_copy.read(chunk_size)
-                    if not chunk:
-                        break
-                    dest_file.write(chunk)
-                    # 주기적으로 메모리 비우기
-                    if hasattr(dest_file, 'flush'):
-                        dest_file.flush()
+            # 문자열 경로인 경우 (최적화된 처리)
+            if isinstance(file_obj, str) and os.path.isfile(file_obj):
+                # 임시 파일 여부 확인
+                is_temp_file = file_obj.startswith(tempfile.gettempdir())
+                file_size = os.path.getsize(file_obj)
+                
+                # 디버깅 정보 출력
+                print(f"파일 업로드: 경로={file_obj}, 크기={format_file_size(file_size)}, 임시파일={is_temp_file}")
+                
+                # 대용량 파일 처리 최적화 (직접 이동 또는 버퍼 복사)
+                if is_temp_file:
+                    # 임시 파일은 이동으로 즉시 처리
+                    try:
+                        # 직접 이동 (OS 레벨 최적화)
+                        shutil.move(file_obj, destination)
+                        return True
+                    except (shutil.Error, OSError) as e:
+                        print(f"임시 파일 이동 실패: {str(e)}")
+                        # 이동 실패 시 스트리밍 복사로 대체
+                        return self._stream_copy_file(file_obj, destination)
+                else:
+                    # 일반 파일은 스트리밍 복사 (메모리 사용량 최소화)
+                    return self._stream_copy_file(file_obj, destination)
+            
+            # 파일 객체인 경우
+            elif hasattr(file_obj, 'read'):
+                # 스트리밍 복사를 통한 최적화
+                with open(destination, 'wb') as out_file:
+                    # 버퍼 크기 설정 (너무 작으면 성능 저하, 너무 크면 메모리 사용량 증가)
+                    buffer_size = 8 * 1024 * 1024  # 8MB 청크
+                    
+                    # 파일 포인터를 처음으로 되돌림 (필요한 경우)
+                    if hasattr(file_obj, 'seek'):
+                        file_obj.seek(0)
+                    
+                    # 청크 복사 최적화
+                    bytes_copied = 0
+                    chunk_count = 0
+                    
+                    while True:
+                        chunk = file_obj.read(buffer_size)
+                        if not chunk:
+                            break
+                        
+                        # 직접 쓰기 및 플러시
+                        out_file.write(chunk)
+                        out_file.flush()
+                        
+                        # 진행 상황 계산
+                        bytes_copied += len(chunk)
+                        chunk_count += 1
+                        
+                        # 메모리 정리 (10개 청크마다)
+                        if chunk_count % 10 == 0:
+                            del chunk
+                            gc.collect()
+                    
+                    print(f"파일 복사 완료: {bytes_copied} 바이트")
+                return True
+            else:
+                # 지원되지 않는 파일 객체 유형
+                print(f"지원되지 않는 파일 객체 유형: {type(file_obj)}")
+                return False
+                
+        except Exception as e:
+            print(f"파일 업로드 처리 오류: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+            
+    def _stream_copy_file(self, src, dst, buffer_size=8*1024*1024):
+        """대용량 파일을 스트리밍 방식으로 복사 (메모리 사용량 최소화)"""
+        try:
+            # 이미 존재하는 목적지 파일 삭제
+            if os.path.exists(dst):
+                os.remove(dst)
+                
+            # 진행 상황 및 성능 통계 변수
+            total_size = os.path.getsize(src)
+            bytes_copied = 0
+            start_time = time.time()
+            
+            # 스트리밍 복사
+            with open(src, 'rb') as src_file:
+                with open(dst, 'wb') as dst_file:
+                    chunk_count = 0
+                    while True:
+                        buf = src_file.read(buffer_size)
+                        if not buf:
+                            break
+                            
+                        # 디스크에 쓰기
+                        dst_file.write(buf)
+                        dst_file.flush()
+                        
+                        # 진행 상황 업데이트
+                        bytes_copied += len(buf)
+                        chunk_count += 1
+                        
+                        # 진행 상황 로깅 (100MB마다 또는 10개 청크마다)
+                        if chunk_count % 10 == 0 or bytes_copied % (100*1024*1024) < buffer_size:
+                            elapsed = time.time() - start_time
+                            speed = bytes_copied / elapsed / 1024 / 1024 if elapsed > 0 else 0
+                            progress = bytes_copied / total_size * 100 if total_size > 0 else 0
+                            print(f"복사 진행률: {progress:.1f}% ({format_file_size(bytes_copied)}/{format_file_size(total_size)}) - {speed:.1f} MB/s")
+                        
+                        # 주기적 메모리 관리
+                        if chunk_count % 10 == 0:  # 10개 청크마다
+                            del buf
+                            gc.collect()
+            
+            # 복사 완료 통계
+            elapsed = time.time() - start_time
+            speed = bytes_copied / elapsed / 1024 / 1024 if elapsed > 0 else 0
+            print(f"파일 복사 완료: {format_file_size(bytes_copied)}, {elapsed:.1f}초, {speed:.1f} MB/s")
             
             return True
         except Exception as e:
-            print(f"파일 업로드 중 오류: {str(e)}")
+            print(f"스트리밍 복사 중 오류: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return False
-
 
     def delete_file(self, file_name):
         """파일 삭제"""

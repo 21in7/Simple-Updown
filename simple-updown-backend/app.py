@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from database import FileMetadataDB
 from r2_storage import R2Storage
 from local_storage import LocalStorage
+import uuid
 
 try:
     from PIL import Image
@@ -248,38 +249,58 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
     temp_file_path = None
     
     try:
-        # 메모리 최적화: 컨텍스트 관리자를 사용하여 임시 파일 자동 삭제 보장
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            temp_file_path = temp_file.name
-            
-            # 청크 단위로 파일 읽고 쓰기
-            chunk_size = 1024 * 1024  # 1MB 청크 크기
-            
-            # 해시 계산을 위한 객체 초기화
-            md5_hash_obj = hashlib.md5()
-            sha1_hash_obj = hashlib.sha1()
-            sha256_hash_obj = hashlib.sha256()
-            
-            # 메모리 최적화: 청크별 처리를 위한 파일 지시자 위치 저장 변수
-            current_position = 0
-            
-            # 청크 단위로 파일 읽기 (메모리 최적화를 위해 한 번에 한 청크만 처리)
-            while chunk := await file.read(chunk_size):
-                # 각 해시 업데이트
+        # 메모리 최적화: 스트리밍 방식 파일 처리
+        # 임시 파일 이름 직접 생성 (임시 디렉토리에)
+        temp_dir = tempfile.gettempdir()
+        temp_file_name = f"upload_{uuid.uuid4().hex}.tmp"
+        temp_file_path = os.path.join(temp_dir, temp_file_name)
+        
+        # 해시 계산을 위한 객체 초기화
+        md5_hash_obj = hashlib.md5()
+        sha1_hash_obj = hashlib.sha1()
+        sha256_hash_obj = hashlib.sha256()
+        
+        # 메모리 최적화: 직접 디스크에 쓰기 작업
+        print(f"임시 파일 생성: {temp_file_path}")
+        
+        # 최적화된 청크 처리 (메모리 사용량 최소화)
+        chunk_size = 8 * 1024 * 1024  # 8MB 청크 크기
+        chunk_count = 0
+        processed_size = 0
+        
+        with open(temp_file_path, 'wb') as temp_file:
+            async for chunk in file.stream(chunk_size):
+                if not chunk:
+                    continue
+                
+                # 해시 업데이트 (각 청크별로)
                 md5_hash_obj.update(chunk)
                 sha1_hash_obj.update(chunk)
                 sha256_hash_obj.update(chunk)
                 
-                # 임시 파일에 쓰기
+                # 디스크에 직접 쓰기
                 temp_file.write(chunk)
+                temp_file.flush()
                 
-                # 파일 크기 업데이트
-                file_size += len(chunk)
+                # 파일 크기 업데이트 및 진행 상황 로깅
+                chunk_length = len(chunk)
+                file_size += chunk_length
+                processed_size += chunk_length
                 
-                # 메모리 관리: 큰 청크 처리 후 명시적 가비지 컬렉션 트리거
-                if file_size > 100 * 1024 * 1024:  # 100MB마다
+                # 주기적 진행 상황 출력 (100MB마다)
+                if processed_size >= 100 * 1024 * 1024:
+                    print(f"업로드 진행 중: {format_file_size(file_size)} 처리됨")
+                    processed_size = 0
+                
+                # 주기적으로 명시적 메모리 정리
+                chunk_count += 1
+                if chunk_count % 10 == 0:  # 10개 청크마다
+                    del chunk
                     import gc
                     gc.collect()
+        
+        # 진행 상황 최종 출력
+        print(f"업로드 완료: 총 {format_file_size(file_size)}")
         
         # 파일 크기가 0이면 에러 반환
         if file_size <= 0:
@@ -293,11 +314,19 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         # 메모리 최적화: 해시 객체 명시적 삭제
         del md5_hash_obj, sha1_hash_obj, sha256_hash_obj
         
+        # 메모리 정리
+        gc.collect()
+        
         # 파일 업로드 - 임시 파일 경로를 전달하여 스트림으로 처리
         if storage_type == "local":
-            storage.upload_file(temp_file_path, file_hash)
+            upload_success = storage.upload_file(temp_file_path, file_hash)
+            # 업로드 실패 시 예외 발생
+            if not upload_success:
+                raise HTTPException(status_code=500, detail="Failed to store file")
         else:
-            r2.upload_file(temp_file_path, file_hash)
+            upload_success = r2.upload_file(temp_file_path, file_hash)
+            if not upload_success:
+                raise HTTPException(status_code=500, detail="Failed to store file in R2")
         
         # 현재 시간 계산 (UTC로 명시)
         now = datetime.datetime.utcnow()
@@ -308,7 +337,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         else:
             expire_time = now + timedelta(minutes=expire_in_minutes)
         
-        # 메타데이터 저장
+        # 최소 메타데이터만 생성
         metadata = {
             "file_name": file.filename,
             "file_size": file_size,
@@ -325,22 +354,35 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             "expire_minutes": expire_in_minutes  # 요청된 만료 시간(분) 저장
         }
         
+        # 메타데이터 저장 (DB에 삽입)
         doc_id = db.insert(metadata)
         
         # 공유 URL 생성
         base_url = str(request.base_url).rstrip("/")
         share_url = f"{base_url}/download/{file_hash}"
         
+        # 명시적 메모리 정리
+        gc.collect()
+        
+        # 최소한의 응답 데이터만 반환
         return {
             "success": True,
             "message": "File uploaded successfully.",
             "redirect_to": "/files/",
-            "file_info": metadata,
-            "share_url": share_url  # 공유 URL 추가
+            "file_info": {
+                "file_name": file.filename,
+                "file_size": file_size,
+                "formatted_size": format_file_size(file_size),
+                "hash": file_hash,
+                "share_url": share_url
+            }
         }
     except Exception as e:
         # 에러 로깅
         print(f"파일 업로드 중 오류 발생: {str(e)}")
+        # 스택 트레이스 출력 (디버깅용)
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
     finally:
         # 메모리 최적화: 임시 파일 정리 보장
@@ -351,8 +393,10 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             except Exception as e:
                 print(f"임시 파일 삭제 실패: {str(e)}")
         
+        # FastAPI UploadFile 파일 정리
+        await file.close()
+        
         # 메모리 관리: 명시적 가비지 컬렉션 호출
-        import gc
         gc.collect()
 
 @app.get("/download/{file_hash}")
