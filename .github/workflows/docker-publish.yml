@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0  # 전체 히스토리를 가져와 태그 및 커밋 수를 계산하기 위함
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
@@ -22,6 +24,25 @@ jobs:
       with:
         username: ${{ secrets.DOCKER_HUB_USERNAME }}
         password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+    
+    - name: Generate version number
+      id: version
+      run: |
+        # 커밋 개수를 기준으로 마이너 버전 생성
+        COMMIT_COUNT=$(git rev-list --count HEAD)
+        # 현재 날짜를 기준으로 메이저 버전 생성 (YYMM 형식)
+        DATE_VERSION=$(date +'%y.%m')
+        # 최종 버전 포맷: v[년.월].[커밋 개수]
+        VERSION="v${DATE_VERSION}.${COMMIT_COUNT}"
+        
+        echo "Current version: $VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        
+        # 이전 버전들 목록도 생성 (최신 5개)
+        PREV_COUNT=$((COMMIT_COUNT - 1))
+        PREV_VERSION="v${DATE_VERSION}.${PREV_COUNT}"
+        echo "Previous version: $PREV_VERSION"
+        echo "prev_version=$PREV_VERSION" >> $GITHUB_OUTPUT
 
     - name: Build and push Local version
       uses: docker/build-push-action@v4
@@ -30,9 +51,14 @@ jobs:
         file: ./Dockerfile
         push: true
         platforms: linux/amd64,linux/arm64
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:latest,${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:local
+        tags: |
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:latest
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:local
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-local
         build-args: |
           STORAGE_TYPE=local
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          VERSION=${{ steps.version.outputs.version }}
 
     - name: Build and push R2 version
       uses: docker/build-push-action@v4
@@ -41,6 +67,22 @@ jobs:
         file: ./Dockerfile
         push: true
         platforms: linux/amd64,linux/arm64
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:r2
-        build-args:
+        tags: |
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:r2
+          ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-r2
+        build-args: |
           STORAGE_TYPE=r2
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          VERSION=${{ steps.version.outputs.version }}
+          
+    - name: Display version info
+      run: |
+        echo "새 버전이 생성되었습니다: ${{ steps.version.outputs.version }}"
+        echo "이전 버전: ${{ steps.version.outputs.prev_version }}"
+        echo ""
+        echo "생성된 이미지 태그:"
+        echo "- ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:latest"
+        echo "- ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:local"
+        echo "- ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-local"
+        echo "- ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:r2"
+        echo "- ${{ secrets.DOCKER_HUB_USERNAME }}/simple-updown:${{ steps.version.outputs.version }}-r2"

@@ -18,6 +18,15 @@ WORKDIR /app
 ARG STORAGE_TYPE=local
 ENV STORAGE_TYPE=${STORAGE_TYPE}
 
+# Add build information (optional)
+ARG BUILD_DATE=""
+ARG VERSION="devel"
+LABEL maintainer="simple-updown"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.description="Simple Upload/Download Service"
+LABEL storage.type="${STORAGE_TYPE}"
+
 # Copy backend requirements and install
 COPY simple-updown-backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -30,6 +39,11 @@ RUN mkdir -p /app/static /app/uploads /app/file_metadata
 
 # Copy built frontend to backend static files
 COPY --from=frontend-builder /app/frontend/dist/ /app/static/
+
+# Create version info file
+RUN echo "Storage Type: ${STORAGE_TYPE}" > /app/static/version.txt && \
+    echo "Build Date: ${BUILD_DATE}" >> /app/static/version.txt && \
+    echo "Version: ${VERSION}" >> /app/static/version.txt
 
 # Expose API port
 EXPOSE 9000
