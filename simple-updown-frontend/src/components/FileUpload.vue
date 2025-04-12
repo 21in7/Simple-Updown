@@ -18,13 +18,13 @@
       
       <div class="expiration-selector">
         <label for="expiration-time">유지 기간:</label>
-        <select id="expiration-time" v-model="expirationMinutes">
-          <option value="5">5분</option>
-          <option value="60">1시간</option>
-          <option value="1440">1일</option>
-          <option value="4320">3일</option>
-          <option value="10080">7일</option>
-          <option value="21600">15일</option>
+        <select id="expiration-time" v-model.number="expirationMinutes">
+          <option :value="5">5분</option>
+          <option :value="60">1시간</option>
+          <option :value="1440">1일</option>
+          <option :value="4320">3일</option>
+          <option :value="10080">7일</option>
+          <option :value="21600">15일</option>
         </select>
       </div>
       
@@ -96,14 +96,20 @@ export default {
         type: this.selectedFile.type,
         size: this.selectedFile.size
       });
-      console.log('선택된 유지 기간(분):', this.expirationMinutes);
+      console.log('선택된 유지 기간(분):', this.expirationMinutes, '타입:', typeof this.expirationMinutes);
       
       const formData = new FormData();
       formData.append('file', this.selectedFile);
-      formData.append('expire_in_minutes', this.expirationMinutes);
+      // 명시적으로 숫자 변환 후 추가
+      const minutes = parseInt(this.expirationMinutes, 10);
+      formData.append('expire_in_minutes', minutes);
+      
+      console.log('FormData expire_in_minutes 값:', minutes, '타입:', typeof minutes);
       
       try {
-        const response = await axios.post('/upload/', formData, {
+        // 업로드 요청 전송 시 URL 파라미터로도 추가
+        const url = `/upload/?expire_in_minutes=${minutes}`;
+        const response = await axios.post(url, formData, {
           headers: {
             'Content-Type': 'multipart/form-data'
           },

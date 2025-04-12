@@ -229,7 +229,12 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
     # 디버깅 로그 추가
     print(f"업로드 받은 파일명: {file.filename}")
     print(f"업로드 클라이언트 IP: {client_ip}, 표시용 IP: {ip_prefix}")
-    print(f"요청된 만료 시간(분): {expire_in_minutes}")
+    print(f"요청된 만료 시간(분): {expire_in_minutes} (타입: {type(expire_in_minutes)})")
+    
+    # 유효한 expire_in_minutes 값인지 확인
+    if not isinstance(expire_in_minutes, int) or expire_in_minutes <= 0:
+        print(f"유효하지 않은 만료 시간 값: {expire_in_minutes}, 기본값 5분으로 설정")
+        expire_in_minutes = 5
     
     if file_size <= 0:
         raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
@@ -566,3 +571,16 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
         return StreamingResponse(thumbnail_io, media_type=mime_type)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
+
+# 파라미터 테스트 엔드포인트
+@app.get("/api/test-param")
+async def test_param(expire_in_minutes: int = 5):
+    """
+    파라미터 처리를 테스트하기 위한 엔드포인트
+    """
+    print(f"테스트 엔드포인트 호출 - expire_in_minutes: {expire_in_minutes} (타입: {type(expire_in_minutes)})")
+    return {
+        "received_value": expire_in_minutes,
+        "type": str(type(expire_in_minutes)),
+        "is_valid": isinstance(expire_in_minutes, int) and expire_in_minutes > 0
+    }

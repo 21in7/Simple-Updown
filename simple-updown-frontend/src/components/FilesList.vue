@@ -41,7 +41,8 @@
                 {{ formatDate(file.expire_time) }}
                 <span class="expire-time-left">({{ getTimeLeft(file.expire_time) }})</span>
                 <span v-if="file.expire_minutes" class="expire-original-setting">
-                  설정: {{ getExpirationText(file.expire_minutes) }}
+                  설정: <strong>{{ getExpirationText(file.expire_minutes) }}</strong>
+                  <span class="debug-note">[{{ file.expire_minutes }}]</span>
                 </span>
               </td>
               <td class="file-actions-cell">
@@ -362,9 +363,11 @@
         }
       },
       getExpirationText(minutes) {
-        if (!minutes || isNaN(parseInt(minutes))) return '';
+        if (!minutes || isNaN(parseInt(minutes, 10))) return '';
         
-        const mins = parseInt(minutes);
+        const mins = parseInt(minutes, 10);
+        console.log('expire_minutes 원본값:', minutes, '타입:', typeof minutes, '변환후:', mins);
+        
         if (mins < 60) {
           return `${mins}분`;
         } else if (mins < 1440) {
@@ -515,6 +518,12 @@ h2 {
   display: block;
   font-size: 0.85em;
   color: #666;
+}
+
+.debug-note {
+  font-size: 0.8em;
+  color: #999;
+  margin-left: 4px;
 }
 
 .action-button {
