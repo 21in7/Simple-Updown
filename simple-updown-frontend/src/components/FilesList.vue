@@ -37,7 +37,10 @@
               <td class="file-size-cell">{{ file.formatted_size || formatFileSize(file.file_size) }}</td>
               <td class="file-uploader-cell">{{ file.uploader_ip ? '업로드 유저: ' + file.uploader_ip : '알 수 없음' }}</td>
               <td class="file-date-cell">{{ formatDate(file.date) }}</td>
-              <td class="file-expire-cell" :class="{ 'expire-soon': isExpiringSoon(file.expire_time) }">
+              <td class="file-expire-cell" :class="{ 
+                'expire-soon': isExpiringSoon(file.expire_time),
+                'expire-unlimited': isUnlimited(file.expire_time) || file.expire_minutes === -1
+              }">
                 {{ formatDate(file.expire_time) }}
                 <span class="expire-time-left">({{ getTimeLeft(file.expire_time) }})</span>
                 <span v-if="file.expire_minutes" class="expire-original-setting">
@@ -257,6 +260,12 @@
           expireTime = new Date(expireTimeStr + 'Z');
         }
         
+        // 무제한인 경우 (100년 이상 차이)
+        const diffMs = expireTime - now;
+        if (diffMs > 1000 * 60 * 60 * 24 * 365 * 90) { // 90년 이상
+          return false; // 무제한은 만료 임박 스타일 적용 안함
+        }
+        
         // 24시간 이내에 만료되는 경우 강조 표시
         return (expireTime - now) < 24 * 60 * 60 * 1000;
       },
@@ -281,6 +290,11 @@
           console.log(`시간차이(ms): ${diffMs}`);
           
           if (diffMs <= 0) return '만료됨';
+          
+          // 무제한 처리 (100년 이상 차이나면 무제한으로 간주)
+          if (diffMs > 1000 * 60 * 60 * 24 * 365 * 90) { // 90년 이상
+            return '무제한';
+          }
           
           const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
           const diffHours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
@@ -368,6 +382,11 @@
         const mins = parseInt(minutes, 10);
         console.log('expire_minutes 원본값:', minutes, '타입:', typeof minutes, '변환후:', mins);
         
+        // 무제한인 경우
+        if (mins === -1) {
+          return '무제한';
+        }
+        
         if (mins < 60) {
           return `${mins}분`;
         } else if (mins < 1440) {
@@ -377,6 +396,23 @@
         } else {
           return `${Math.floor(mins / 10080)}주`;
         }
+      },
+      isUnlimited(expireTimeStr) {
+        if (!expireTimeStr) return false;
+        const now = new Date();
+        
+        // UTC 시간 처리
+        let expireTime;
+        if (expireTimeStr.endsWith('Z')) {
+          expireTime = new Date(expireTimeStr);
+        } else {
+          // Z가 없는 경우 수동으로 UTC 처리
+          expireTime = new Date(expireTimeStr + 'Z');
+        }
+        
+        // 무제한인 경우 (90년 이상 차이)
+        const diffMs = expireTime - now;
+        return diffMs > 1000 * 60 * 60 * 24 * 365 * 90; // 90년 이상
       }
     }
   }
@@ -511,6 +547,12 @@ h2 {
 
 .expire-soon .expire-time-left {
   color: #f44336;
+  font-weight: bold;
+}
+
+/* 무제한 스타일 */
+.expire-unlimited {
+  color: #2196f3;
   font-weight: bold;
 }
 

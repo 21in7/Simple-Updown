@@ -232,7 +232,15 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
     print(f"요청된 만료 시간(분): {expire_in_minutes} (타입: {type(expire_in_minutes)})")
     
     # 유효한 expire_in_minutes 값인지 확인
-    if not isinstance(expire_in_minutes, int) or expire_in_minutes <= 0:
+    if not isinstance(expire_in_minutes, int):
+        print(f"유효하지 않은 만료 시간 값: {expire_in_minutes}, 기본값 5분으로 설정")
+        expire_in_minutes = 5
+    
+    # 무제한인 경우 처리 (값이 -1)
+    is_unlimited = expire_in_minutes == -1
+    if is_unlimited:
+        print("무제한 유지 기간 설정")
+    elif expire_in_minutes <= 0:
         print(f"유효하지 않은 만료 시간 값: {expire_in_minutes}, 기본값 5분으로 설정")
         expire_in_minutes = 5
     
@@ -272,12 +280,15 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         # 현재 시간 계산 (UTC로 명시)
         now = datetime.datetime.utcnow()
         
-        # 만료 시간 계산
-        expire_time = now + timedelta(minutes=expire_in_minutes)
+        # 만료 시간 계산 (무제한이면 100년)
+        if is_unlimited:
+            expire_time = now + timedelta(days=36500)  # 약 100년
+        else:
+            expire_time = now + timedelta(minutes=expire_in_minutes)
         
         # 시간 디버깅 정보
         print(f"현재 UTC 시간: {now.isoformat()}")
-        print(f"요청된 만료 시간: {expire_in_minutes}분")
+        print(f"요청된 만료 시간: {'무제한' if is_unlimited else f'{expire_in_minutes}분'}")
         print(f"만료 UTC 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
         
         # 확장자 확인 및 로깅

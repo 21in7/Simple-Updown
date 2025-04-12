@@ -25,6 +25,7 @@
           <option :value="4320">3일</option>
           <option :value="10080">7일</option>
           <option :value="21600">15일</option>
+          <option :value="-1">무제한</option>
         </select>
       </div>
       
