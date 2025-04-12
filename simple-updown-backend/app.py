@@ -7,6 +7,9 @@ import tempfile
 import datetime
 import pyshorteners
 import io
+import gc
+import uuid
+import traceback
 from datetime import timedelta
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse, RedirectResponse, FileResponse, JSONResponse
@@ -18,7 +21,6 @@ from dotenv import load_dotenv
 from database import FileMetadataDB
 from r2_storage import R2Storage
 from local_storage import LocalStorage
-import uuid
 
 try:
     from PIL import Image
@@ -296,7 +298,6 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
                 chunk_count += 1
                 if chunk_count % 10 == 0:  # 10개 청크마다
                     del chunk
-                    import gc
                     gc.collect()
         
         # 진행 상황 최종 출력
@@ -381,7 +382,6 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         # 에러 로깅
         print(f"파일 업로드 중 오류 발생: {str(e)}")
         # 스택 트레이스 출력 (디버깅용)
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
     finally:
@@ -740,7 +740,6 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
                         img = img.resize(new_size, Image.LANCZOS)
                         
                         # 각 단계 후 가비지 컬렉션
-                        import gc
                         gc.collect()
                 
                 # 썸네일 생성 (기존 코드 유지)
@@ -766,7 +765,6 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
                 del img
                 
                 # 가비지 컬렉션
-                import gc
                 gc.collect()
         except Exception as e:
             print(f"썸네일 생성 중 오류: {str(e)}")
