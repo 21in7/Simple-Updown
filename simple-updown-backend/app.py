@@ -271,9 +271,11 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         processed_size = 0
         
         with open(temp_file_path, 'wb') as temp_file:
-            async for chunk in file.stream(chunk_size):
-                if not chunk:
-                    continue
+            # UploadFile에는 stream 메서드가 없으므로 read 메서드 사용
+            while True:
+                chunk = await file.read(chunk_size)
+                if not chunk:  # 파일의 끝에 도달하면 빈 바이트 문자열 반환
+                    break
                 
                 # 해시 업데이트 (각 청크별로)
                 md5_hash_obj.update(chunk)
