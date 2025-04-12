@@ -216,13 +216,19 @@ async def list_files():
     return {"files": files}
 
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
+async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, request: Request = None):
     # 파일 크기 확인 (0 바이트 파일 체크)
     contents = await file.read()
     file_size = len(contents)
     
+    # 클라이언트 IP 가져오기
+    client_ip = request.client.host if request else "unknown"
+    # IP의 앞부분 두 자리만 추출
+    ip_prefix = '.'.join(client_ip.split('.')[:2]) if '.' in client_ip else client_ip
+    
     # 디버깅 로그 추가
     print(f"업로드 받은 파일명: {file.filename}")
+    print(f"업로드 클라이언트 IP: {client_ip}, 표시용 IP: {ip_prefix}")
     
     if file_size <= 0:
         raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
@@ -284,7 +290,8 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
                 "sha256": file_hash
             },
             "expire_time": expire_time.isoformat() + "Z",  # Z는 UTC 시간임을 나타냄
-            "date": now.isoformat() + "Z"
+            "date": now.isoformat() + "Z",
+            "uploader_ip": ip_prefix  # 업로더 IP 추가
         }
         
         # 메타데이터 저장 결과 디버깅
@@ -293,11 +300,16 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5):
         
         doc_id = db.insert(metadata)
         
+        # 공유 URL 생성
+        base_url = str(request.base_url).rstrip("/")
+        share_url = f"{base_url}/download/{file_hash}"
+        
         return {
             "success": True,
             "message": "File uploaded successfully.",
             "redirect_to": "/files/",
-            "file_info": metadata
+            "file_info": metadata,
+            "share_url": share_url  # 공유 URL 추가
         }
     except Exception as e:
         # 에러 발생 시 임시 파일이 남아있다면 삭제

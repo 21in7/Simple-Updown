@@ -18,6 +18,7 @@
               <th class="file-preview-header">미리보기</th>
               <th class="file-name-header">파일명</th>
               <th class="file-size-header">크기</th>
+              <th class="file-uploader-header">업로더</th>
               <th class="file-date-header">업로드 날짜</th>
               <th class="file-expire-header">만료일</th>
               <th class="file-actions-header">작업</th>
@@ -34,22 +35,31 @@
               </td>
               <td class="file-name-cell">{{ file.file_name }}</td>
               <td class="file-size-cell">{{ file.formatted_size || formatFileSize(file.file_size) }}</td>
+              <td class="file-uploader-cell">{{ file.uploader_ip ? '업로드 유저: ' + file.uploader_ip : '알 수 없음' }}</td>
               <td class="file-date-cell">{{ formatDate(file.date) }}</td>
               <td class="file-expire-cell" :class="{ 'expire-soon': isExpiringSoon(file.expire_time) }">
                 {{ formatDate(file.expire_time) }}
                 <span class="expire-time-left">({{ getTimeLeft(file.expire_time) }})</span>
               </td>
               <td class="file-actions-cell">
-                <button @click="downloadFile(file)" class="action-button download">
-                  다운로드
+                <button @click="downloadFile(file)" class="action-button download" title="다운로드">
+                  <span class="button-icon">⬇️</span>
                 </button>
-                <button @click="deleteFile(file.hash.sha256)" class="action-button delete">
-                  삭제
+                <button @click="shareFile(file)" class="action-button share" title="공유 링크 복사">
+                  <span class="button-icon">🔗</span>
+                </button>
+                <button @click="deleteFile(file.hash.sha256)" class="action-button delete" title="삭제">
+                  <span class="button-icon">🗑️</span>
                 </button>
               </td>
             </tr>
           </tbody>
         </table>
+      </div>
+      
+      <!-- 공유 링크 복사 알림 -->
+      <div v-if="showCopyAlert" class="copy-alert">
+        링크가 클립보드에 복사되었습니다!
       </div>
     </div>
   </template>
@@ -63,7 +73,8 @@
       return {
         files: [],
         loading: true,
-        refreshInterval: null
+        refreshInterval: null,
+        showCopyAlert: false
       }
     },
     computed: {
@@ -177,6 +188,21 @@
       onThumbnailError(event) {
         event.target.style.display = 'none';
         event.target.nextElementSibling.style.display = 'block';
+      },
+      // 파일 공유 링크 생성 및 클립보드 복사
+      async shareFile(file) {
+        try {
+          const shareUrl = `${window.location.origin}/download/${file.hash.sha256}`;
+          await navigator.clipboard.writeText(shareUrl);
+          
+          // 성공 알림 표시
+          this.showCopyAlert = true;
+          setTimeout(() => {
+            this.showCopyAlert = false;
+          }, 2000);
+        } catch (error) {
+          alert('링크 복사에 실패했습니다. 브라우저에서 클립보드 접근을 허용해주세요.');
+        }
       },
       formatFileSize(bytes) {
         if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
@@ -341,6 +367,7 @@
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
+  position: relative;
 }
 
 h2 {
@@ -427,6 +454,13 @@ h2 {
   text-align: center;
 }
 
+.file-uploader-cell {
+  width: 150px;
+  text-align: center;
+  font-size: 14px;
+  color: #666;
+}
+
 .file-date-cell {
   width: 150px;
   text-align: center;
@@ -449,18 +483,28 @@ h2 {
 }
 
 .file-actions-cell {
-  width: 180px;
+  width: 160px;
   text-align: center;
+  white-space: nowrap;
 }
 
 .action-button {
-  margin: 0 5px;
-  padding: 6px 12px;
+  margin: 0 3px;
+  padding: 8px;
   border: none;
   border-radius: 4px;
   cursor: pointer;
   font-size: 14px;
   transition: background-color 0.3s;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button-icon {
+  font-size: 18px;
 }
 
 .download {
@@ -470,6 +514,15 @@ h2 {
 
 .download:hover {
   background-color: #388e3c;
+}
+
+.share {
+  background-color: #2196f3;
+  color: white;
+}
+
+.share:hover {
+  background-color: #1976d2;
 }
 
 .delete {
@@ -487,5 +540,26 @@ h2 {
   background-color: #f0f0f0;
   border-radius: 5px;
   font-size: 14px;
+}
+
+.copy-alert {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  z-index: 9999;
+  animation: fade-in-out 2s ease-in-out;
+}
+
+@keyframes fade-in-out {
+  0% { opacity: 0; }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
 </style>
