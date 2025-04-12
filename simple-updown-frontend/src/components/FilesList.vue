@@ -319,10 +319,10 @@
             expireTime = new Date(expireTimeStr + 'Z');
           }
           
-          console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
+          // console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
           
           const diffMs = expireTime - now;
-          console.log(`시간차이(ms): ${diffMs}`);
+          // console.log(`시간차이(ms): ${diffMs}`);
           
           if (diffMs <= 0) return '만료됨';
           
@@ -415,7 +415,7 @@
         if (!minutes || isNaN(parseInt(minutes, 10))) return '';
         
         const mins = parseInt(minutes, 10);
-        console.log('expire_minutes 원본값:', minutes, '타입:', typeof minutes, '변환후:', mins);
+        // console.log('expire_minutes 원본값:', minutes, '타입:', typeof minutes, '변환후:', mins);
         
         // 무제한인 경우
         if (mins === -1) {
@@ -449,7 +449,7 @@
         const diffMs = expireTime - now;
         return diffMs > 1000 * 60 * 60 * 24 * 365 * 90; // 90년 이상
       },
-      showMultiUploadMessage(message) {
+      displayUploadMessage(message) {
         this.showMultiUploadMessage = true;
         this.uploadCompleteMessage = message;
       },
