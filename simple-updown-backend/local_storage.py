@@ -9,29 +9,58 @@ class LocalStorage:
         os.makedirs(upload_dir, exist_ok=True)
 
     def upload_file(self, file_obj, file_name):
-        """로컬 파일 시스템에 파일 업로드"""
+        """로컬 파일 시스템에 파일 업로드 (메모리 최적화)"""
         destination = os.path.join(self.upload_dir, file_name)
         
-        # 파일 객체인지 확인 (SpooledTemporaryFile, TemporaryFile, UploadFile 등)
-        if hasattr(file_obj, 'file'):
-            # UploadFile 객체인 경우 내부 파일 객체 사용
-            file_to_copy = file_obj.file
-        elif hasattr(file_obj, 'read'):
-            # 일반 파일 객체인 경우
-            file_to_copy = file_obj
-        else:
-            # 문자열 경로인 경우
-            shutil.copy2(file_obj, destination)
-            return f"/files/{file_name}"
-
-        # 파일 객체일 경우 내용 복사
-        with open(destination, 'wb') as dest_file:
-            # 파일 포인터를 처음으로 되돌림
-            file_to_copy.seek(0)
-            # 내용 복사
-            shutil.copyfileobj(file_to_copy, dest_file)
+        # 문자열 경로인 경우 (최적화된 처리)
+        if isinstance(file_obj, str) and os.path.isfile(file_obj):
+            # 메모리 최적화: 파일을 복사하는 대신 이동 (임시 파일의 경우)
+            if file_obj.startswith(tempfile.gettempdir()):
+                try:
+                    shutil.move(file_obj, destination)
+                    return True
+                except (shutil.Error, OSError):
+                    # 이동 실패시 복사로 대체
+                    shutil.copy2(file_obj, destination)
+                    return True
+            else:
+                # 임시 디렉토리가 아닌 경우 안전하게 복사
+                shutil.copy2(file_obj, destination)
+                return True
         
-        return f"/files/{file_name}"  # 파일 접근 URL 반환
+        # 파일 객체인 경우
+        try:
+            # 파일 객체 유형 식별
+            if hasattr(file_obj, 'file'):
+                # UploadFile 객체인 경우 내부 파일 객체 사용
+                file_to_copy = file_obj.file
+            elif hasattr(file_obj, 'read'):
+                # 일반 파일 객체인 경우
+                file_to_copy = file_obj
+            else:
+                # 처리할 수 없는 유형
+                raise ValueError(f"지원되지 않는 파일 객체 유형: {type(file_obj)}")
+            
+            # 메모리 최적화: 대용량 파일 스트리밍을 위한 작은 청크 사용
+            with open(destination, 'wb') as dest_file:
+                # 파일 포인터를 처음으로 되돌림
+                file_to_copy.seek(0)
+                # 청크 단위로 복사 (버퍼 크기 조정)
+                chunk_size = 1024 * 1024  # 1MB 청크
+                while True:
+                    chunk = file_to_copy.read(chunk_size)
+                    if not chunk:
+                        break
+                    dest_file.write(chunk)
+                    # 주기적으로 메모리 비우기
+                    if hasattr(dest_file, 'flush'):
+                        dest_file.flush()
+            
+            return True
+        except Exception as e:
+            print(f"파일 업로드 중 오류: {str(e)}")
+            return False
+
 
     def delete_file(self, file_name):
         """파일 삭제"""

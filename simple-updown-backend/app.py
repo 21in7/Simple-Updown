@@ -240,9 +240,15 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         print(f"유효하지 않은 만료 시간 값: {expire_in_minutes}, 기본값 5분으로 설정")
         expire_in_minutes = 5
     
-    # 임시 파일 생성 (메모리에 전체 파일을 올리지 않고 디스크에 청크 단위로 저장)
-    temp_file_path = ""
+    # 메모리 최적화를 위한 변수 추가
+    file_hash = None
+    md5_hash = None
+    sha1_hash = None
+    file_size = 0
+    temp_file_path = None
+    
     try:
+        # 메모리 최적화: 컨텍스트 관리자를 사용하여 임시 파일 자동 삭제 보장
         with tempfile.NamedTemporaryFile(delete=False) as temp_file:
             temp_file_path = temp_file.name
             
@@ -254,10 +260,10 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             sha1_hash_obj = hashlib.sha1()
             sha256_hash_obj = hashlib.sha256()
             
-            # 파일 크기 추적
-            file_size = 0
+            # 메모리 최적화: 청크별 처리를 위한 파일 지시자 위치 저장 변수
+            current_position = 0
             
-            # 청크 단위로 파일 읽기
+            # 청크 단위로 파일 읽기 (메모리 최적화를 위해 한 번에 한 청크만 처리)
             while chunk := await file.read(chunk_size):
                 # 각 해시 업데이트
                 md5_hash_obj.update(chunk)
@@ -269,10 +275,14 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
                 
                 # 파일 크기 업데이트
                 file_size += len(chunk)
+                
+                # 메모리 관리: 큰 청크 처리 후 명시적 가비지 컬렉션 트리거
+                if file_size > 100 * 1024 * 1024:  # 100MB마다
+                    import gc
+                    gc.collect()
         
         # 파일 크기가 0이면 에러 반환
         if file_size <= 0:
-            os.unlink(temp_file_path)
             raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
             
         # 최종 해시값 얻기
@@ -280,19 +290,14 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         sha1_hash = sha1_hash_obj.hexdigest()
         file_hash = sha256_hash_obj.hexdigest()
         
-        # 파일 업로드
+        # 메모리 최적화: 해시 객체 명시적 삭제
+        del md5_hash_obj, sha1_hash_obj, sha256_hash_obj
+        
+        # 파일 업로드 - 임시 파일 경로를 전달하여 스트림으로 처리
         if storage_type == "local":
             storage.upload_file(temp_file_path, file_hash)
         else:
             r2.upload_file(temp_file_path, file_hash)
-            
-        # 임시 파일 삭제
-        os.unlink(temp_file_path)
-        
-        # 시스템 시간 정보 확인
-        import time
-        sys_time = time.strftime('%Y-%m-%d %H:%M:%S')
-        print(f"시스템 현재 시간 (time 모듈): {sys_time}")
         
         # 현재 시간 계산 (UTC로 명시)
         now = datetime.datetime.utcnow()
@@ -303,19 +308,9 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         else:
             expire_time = now + timedelta(minutes=expire_in_minutes)
         
-        # 시간 디버깅 정보
-        print(f"현재 UTC 시간: {now.isoformat()}")
-        print(f"요청된 만료 시간: {'무제한' if is_unlimited else f'{expire_in_minutes}분'}")
-        print(f"만료 UTC 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
-        
-        # 확장자 확인 및 로깅
-        original_filename = file.filename
-        if "." not in original_filename:
-            print(f"경고: 파일명에 확장자가 없습니다 - {original_filename}")
-        
         # 메타데이터 저장
         metadata = {
-            "file_name": original_filename,
+            "file_name": file.filename,
             "file_size": file_size,
             "formatted_size": format_file_size(file_size),
             "content_type": file.content_type,
@@ -329,11 +324,6 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             "uploader_ip": ip_prefix,  # 업로더 IP 추가
             "expire_minutes": expire_in_minutes  # 요청된 만료 시간(분) 저장
         }
-        
-        # 메타데이터 저장 결과 디버깅
-        print(f"저장된 메타데이터: file_name={metadata['file_name']}, size={metadata['file_size']}, content_type={metadata['content_type']}")
-        print(f"저장된 날짜: date={metadata['date']}, expire_time={metadata['expire_time']}")
-        print(f"저장된 만료 시간(분): {metadata['expire_minutes']}")
         
         doc_id = db.insert(metadata)
         
@@ -349,10 +339,21 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             "share_url": share_url  # 공유 URL 추가
         }
     except Exception as e:
-        # 에러 발생 시 임시 파일이 남아있다면 삭제
-        if temp_file_path and os.path.exists(temp_file_path):
-            os.unlink(temp_file_path)
+        # 에러 로깅
+        print(f"파일 업로드 중 오류 발생: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
+    finally:
+        # 메모리 최적화: 임시 파일 정리 보장
+        if temp_file_path and os.path.exists(temp_file_path):
+            try:
+                os.unlink(temp_file_path)
+                print("임시 파일 정리 완료")
+            except Exception as e:
+                print(f"임시 파일 삭제 실패: {str(e)}")
+        
+        # 메모리 관리: 명시적 가비지 컬렉션 호출
+        import gc
+        gc.collect()
 
 @app.get("/download/{file_hash}")
 async def download_file(file_hash: str):
@@ -666,35 +667,66 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
                 img_format = "GIF"
                 mime_type = "image/gif"
             
-            try:
-                # 메모리 효율적인 이미지 처리
-                with Image.open(io.BytesIO(img_data)) as img:
-                    # 큰 이미지는 리사이즈 전에 크기 줄이기
-                    if max(img.width, img.height) > 2000:
-                        # 대략적으로 크기 조정 (메모리 효율을 위해)
-                        factor = 2000 / max(img.width, img.height)
-                        intermediate_size = (int(img.width * factor), int(img.height * factor))
-                        img = img.resize(intermediate_size, Image.LANCZOS)
+        try:
+            # Pillow 처리 최적화
+            with Image.open(file_path) as img:
+                # 메모리 최적화: 이미지 처리 전 모드 최적화
+                if img.mode not in ('RGB', 'RGBA'):
+                    img = img.convert('RGB')
                     
-                    # 최종 썸네일 생성
-                    img.thumbnail((width, height), Image.LANCZOS)
+                # 큰 이미지 처리 최적화
+                if max(img.width, img.height) > 2000:
+                    # 단계적 리사이징으로 메모리 사용량 감소
+                    resize_steps = []
+                    current_size = max(img.width, img.height)
+                    target_size = 2000
                     
-                    # 알파 채널 처리 (메모리 최적화)
-                    if img.mode == 'RGBA' and img_format == 'JPEG':
-                        img = img.convert('RGB')
+                    # 한 번에 50% 이상 줄이지 않도록 단계 계산
+                    while current_size > target_size * 1.5:
+                        current_size = int(current_size * 0.7)  # 30% 감소
+                        resize_steps.append(current_size)
                     
-                    # 썸네일을 캐시 파일로 저장
-                    img.save(thumbnail_path, format=img_format, quality=85, optimize=True)
+                    # 최종 목표 크기 추가
+                    resize_steps.append(target_size)
                     
-                    # 캐시된 파일 반환
-                    return FileResponse(
-                        thumbnail_path, 
-                        media_type=mime_type,
-                        headers={"Cache-Control": "max-age=3600, public"}  # 1시간 캐싱
-                    )
-            except Exception as e:
-                print(f"썸네일 생성 중 오류: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
+                    # 단계적으로 크기 줄이기
+                    for step_size in resize_steps:
+                        ratio = step_size / max(img.width, img.height)
+                        new_size = (int(img.width * ratio), int(img.height * ratio))
+                        img = img.resize(new_size, Image.LANCZOS)
+                        
+                        # 각 단계 후 가비지 컬렉션
+                        import gc
+                        gc.collect()
+                
+                # 썸네일 생성 (기존 코드 유지)
+                img.thumbnail((width, height), Image.LANCZOS)
+                
+                # 메모리 최적화: 썸네일 저장 최적화
+                save_options = {}
+                if img_format == "JPEG":
+                    save_options = {'quality': 85, 'optimize': True}
+                elif img_format == "PNG":
+                    save_options = {'optimize': True, 'compress_level': 6}
+                
+                # 저장 전 이미지 메모리 최적화
+                if img.mode == 'RGBA' and img_format == 'JPEG':
+                    background = Image.new('RGB', img.size, (255, 255, 255))
+                    background.paste(img, mask=img.split()[3])  # 3이 알파 채널
+                    img = background
+                
+                img.save(thumbnail_path, format=img_format, **save_options)
+                
+                # 이미지 객체 명시적 정리
+                img.close()
+                del img
+                
+                # 가비지 컬렉션
+                import gc
+                gc.collect()
+        except Exception as e:
+            print(f"썸네일 생성 중 오류: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
     except Exception as e:
         print(f"이미지 처리 중 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
