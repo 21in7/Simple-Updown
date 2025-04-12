@@ -229,6 +229,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
     # 디버깅 로그 추가
     print(f"업로드 받은 파일명: {file.filename}")
     print(f"업로드 클라이언트 IP: {client_ip}, 표시용 IP: {ip_prefix}")
+    print(f"요청된 만료 시간(분): {expire_in_minutes}")
     
     if file_size <= 0:
         raise HTTPException(status_code=400, detail="Empty file cannot be uploaded")
@@ -271,6 +272,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         
         # 시간 디버깅 정보
         print(f"현재 UTC 시간: {now.isoformat()}")
+        print(f"요청된 만료 시간: {expire_in_minutes}분")
         print(f"만료 UTC 시간 ({expire_in_minutes}분 후): {expire_time.isoformat()}")
         
         # 확장자 확인 및 로깅
@@ -291,12 +293,14 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             },
             "expire_time": expire_time.isoformat() + "Z",  # Z는 UTC 시간임을 나타냄
             "date": now.isoformat() + "Z",
-            "uploader_ip": ip_prefix  # 업로더 IP 추가
+            "uploader_ip": ip_prefix,  # 업로더 IP 추가
+            "expire_minutes": expire_in_minutes  # 요청된 만료 시간(분) 저장
         }
         
         # 메타데이터 저장 결과 디버깅
         print(f"저장된 메타데이터: file_name={metadata['file_name']}, size={metadata['file_size']}, content_type={metadata['content_type']}")
         print(f"저장된 날짜: date={metadata['date']}, expire_time={metadata['expire_time']}")
+        print(f"저장된 만료 시간(분): {metadata['expire_minutes']}")
         
         doc_id = db.insert(metadata)
         

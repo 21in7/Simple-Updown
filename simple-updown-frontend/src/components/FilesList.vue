@@ -40,6 +40,9 @@
               <td class="file-expire-cell" :class="{ 'expire-soon': isExpiringSoon(file.expire_time) }">
                 {{ formatDate(file.expire_time) }}
                 <span class="expire-time-left">({{ getTimeLeft(file.expire_time) }})</span>
+                <span v-if="file.expire_minutes" class="expire-original-setting">
+                  설정: {{ getExpirationText(file.expire_minutes) }}
+                </span>
               </td>
               <td class="file-actions-cell">
                 <button @click="downloadFile(file)" class="action-button download" title="다운로드">
@@ -271,10 +274,10 @@
             expireTime = new Date(expireTimeStr + 'Z');
           }
           
-          //console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
+          console.log(`getTimeLeft - 현재시간: ${now.toISOString()}, 만료시간: ${expireTimeStr}, 변환된 만료시간: ${expireTime.toISOString()}`);
           
           const diffMs = expireTime - now;
-          //console.log(`시간차이(ms): ${diffMs}`);
+          console.log(`시간차이(ms): ${diffMs}`);
           
           if (diffMs <= 0) return '만료됨';
           
@@ -290,7 +293,7 @@
             return `${diffMinutes}분 남음`;
           }
         } catch (error) {
-          //console.error('Error calculating time left:', error);
+          console.error('Error calculating time left:', error);
           return '시간 계산 오류';
         }
       },
@@ -357,6 +360,20 @@
           //console.error('Error deleting file:', error);
           alert('파일 삭제 중 오류가 발생했습니다.');
         }
+      },
+      getExpirationText(minutes) {
+        if (!minutes || isNaN(parseInt(minutes))) return '';
+        
+        const mins = parseInt(minutes);
+        if (mins < 60) {
+          return `${mins}분`;
+        } else if (mins < 1440) {
+          return `${Math.floor(mins / 60)}시간`;
+        } else if (mins < 10080) {
+          return `${Math.floor(mins / 1440)}일`;
+        } else {
+          return `${Math.floor(mins / 10080)}주`;
+        }
       }
     }
   }
@@ -396,6 +413,7 @@ h2 {
   border-collapse: collapse;
   text-align: left;
   background-color: white;
+  table-layout: fixed; /* 테이블 레이아웃 고정 */
 }
 
 .files-table th {
@@ -410,15 +428,55 @@ h2 {
   padding: 12px 15px;
   border-bottom: 1px solid #eee;
   vertical-align: middle;
+  word-break: break-word; /* 긴 단어도 줄바꿈 처리 */
 }
 
 .files-table tr:hover {
   background-color: #f9f9f9;
 }
 
-.file-preview-cell {
+.file-preview-header, .file-preview-cell {
   width: 80px;
   text-align: center;
+}
+
+.file-name-header {
+  width: 25%;
+}
+
+.file-name-cell {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal; /* 긴 파일명 여러 줄 표시 */
+}
+
+.file-size-header, .file-size-cell {
+  width: 80px;
+  text-align: center;
+}
+
+.file-uploader-header, .file-uploader-cell {
+  width: 120px;
+  text-align: center;
+  font-size: 14px;
+  color: #666;
+}
+
+.file-date-header, .file-date-cell {
+  width: 150px;
+  text-align: center;
+}
+
+.file-expire-header, .file-expire-cell {
+  width: 150px;
+  text-align: center;
+}
+
+.file-actions-header, .file-actions-cell {
+  width: 130px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .file-thumbnail {
@@ -442,35 +500,6 @@ h2 {
   border: 1px solid #ddd;
 }
 
-.file-name-cell {
-  max-width: 300px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file-size-cell {
-  width: 100px;
-  text-align: center;
-}
-
-.file-uploader-cell {
-  width: 150px;
-  text-align: center;
-  font-size: 14px;
-  color: #666;
-}
-
-.file-date-cell {
-  width: 150px;
-  text-align: center;
-}
-
-.file-expire-cell {
-  width: 200px;
-  text-align: center;
-}
-
 .expire-time-left {
   display: block;
   font-size: 0.85em;
@@ -482,10 +511,10 @@ h2 {
   font-weight: bold;
 }
 
-.file-actions-cell {
-  width: 160px;
-  text-align: center;
-  white-space: nowrap;
+.expire-original-setting {
+  display: block;
+  font-size: 0.85em;
+  color: #666;
 }
 
 .action-button {
