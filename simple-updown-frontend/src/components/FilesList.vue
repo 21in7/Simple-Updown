@@ -1,6 +1,12 @@
 <template>
     <div class="files-container">
       <h2>파일 목록</h2>
+      <!-- 다중 업로드 완료 메시지 -->
+      <div v-if="showMultiUploadMessage" class="multi-upload-message">
+        {{ uploadCompleteMessage }}
+        <button @click="dismissUploadMessage" class="dismiss-button">×</button>
+      </div>
+      
       <!-- 디버깅 정보 표시 -->
       <div class="debug-info">
         <p>총 파일 수: {{ files.length }}</p>
@@ -81,7 +87,9 @@
         files: [],
         loading: true,
         refreshInterval: null,
-        showCopyAlert: false
+        showCopyAlert: false,
+        showMultiUploadMessage: false,
+        uploadCompleteMessage: ''
       }
     },
     computed: {
@@ -118,6 +126,33 @@
       this.refreshInterval = setInterval(() => {
         this.fetchFiles();
       }, 60000);
+
+      // URL 쿼리에서 업로드 완료 정보 확인
+      const query = this.$route.query;
+      if (query.upload_complete === 'true') {
+        // 쿼리 파라미터에서 업로드 된 파일 수 확인
+        const count = query.count ? parseInt(query.count, 10) : 1;
+        
+        // 다중 업로드 메시지 표시
+        if (count > 1) {
+          this.uploadCompleteMessage = `${count}개의 파일이 성공적으로 업로드되었습니다.`;
+          this.showMultiUploadMessage = true;
+        } else {
+          this.uploadCompleteMessage = "파일이 성공적으로 업로드되었습니다.";
+          this.showMultiUploadMessage = true;
+        }
+        
+        // 3초 후 메시지 숨기기
+        setTimeout(() => {
+          this.showMultiUploadMessage = false;
+          
+          // URL에서 쿼리 파라미터 제거
+          this.$router.replace({ 
+            path: this.$route.path,
+            query: {}
+          });
+        }, 3000);
+      }
     },
     beforeUnmount() {
       // 컴포넌트 언마운트 시 인터벌 정리
@@ -413,6 +448,13 @@
         // 무제한인 경우 (90년 이상 차이)
         const diffMs = expireTime - now;
         return diffMs > 1000 * 60 * 60 * 24 * 365 * 90; // 90년 이상
+      },
+      showMultiUploadMessage(message) {
+        this.showMultiUploadMessage = true;
+        this.uploadCompleteMessage = message;
+      },
+      dismissUploadMessage() {
+        this.showMultiUploadMessage = false;
       }
     }
   }
@@ -641,5 +683,28 @@ h2 {
   20% { opacity: 1; }
   80% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+.multi-upload-message {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 4px;
+  font-size: 14px;
+  z-index: 9999;
+  animation: fade-in-out 2s ease-in-out;
+}
+
+.dismiss-button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  margin-left: 5px;
 }
 </style>

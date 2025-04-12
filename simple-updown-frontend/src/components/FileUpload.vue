@@ -6,15 +6,17 @@
         type="file" 
         ref="fileInput" 
         @change="onFileSelected" 
-        style="display: none" 
+        style="display: none"
+        multiple
       />
       <button @click="$refs.fileInput.click()" class="upload-button">
         파일 선택
       </button>
-      <p>또는 파일을 여기에 드래그 앤 드롭하세요</p>
+      <p>또는 파일을 여기에 드래그 앤 드롭하세요 (여러 파일 가능)</p>
     </div>
-    <div v-if="selectedFile" class="file-info">
-      <p>선택된 파일: {{ selectedFile.name }}</p>
+    
+    <div v-if="selectedFiles.length > 0" class="files-list">
+      <h3>선택된 파일 ({{ selectedFiles.length }}개)</h3>
       
       <div class="expiration-selector">
         <label for="expiration-time">유지 기간:</label>
@@ -29,11 +31,44 @@
         </select>
       </div>
       
-      <button @click="uploadFile" class="upload-button">업로드</button>
-    </div>
-    <div v-if="uploadProgress > 0" class="progress-bar">
-      <div class="progress" :style="{ width: uploadProgress + '%' }"></div>
-      <span>{{ uploadProgress }}%</span>
+      <div class="selected-files-container">
+        <div v-for="(file, index) in selectedFiles" :key="index" class="file-item">
+          <div class="file-item-info">
+            <span class="file-name">{{ file.name }}</span>
+            <span class="file-size">({{ formatFileSize(file.size) }})</span>
+          </div>
+          <div v-if="fileProgress[index] > 0" class="progress-container">
+            <div class="progress" :style="{ width: fileProgress[index] + '%' }"></div>
+            <span class="progress-text">{{ fileProgress[index] }}%</span>
+          </div>
+          <button 
+            @click="removeFile(index)" 
+            class="remove-button"
+            :disabled="uploadInProgress"
+          >×</button>
+        </div>
+      </div>
+      
+      <div class="upload-actions">
+        <button 
+          @click="uploadFiles" 
+          class="upload-button"
+          :disabled="uploadInProgress"
+        >
+          {{ uploadInProgress ? '업로드 중...' : '업로드' }}
+        </button>
+        <button 
+          @click="clearFiles" 
+          class="clear-button"
+          :disabled="uploadInProgress"
+        >
+          모두 지우기
+        </button>
+      </div>
+      
+      <div v-if="uploadedCount > 0" class="upload-summary">
+        {{ uploadedCount }}/{{ totalFilesToUpload }} 파일 업로드 완료
+      </div>
     </div>
     
     <div v-if="isDragging" class="drag-overlay">
@@ -52,10 +87,14 @@ export default {
   name: 'FileUpload',
   data() {
     return {
-      selectedFile: null,
-      uploadProgress: 0,
+      selectedFiles: [],
+      fileProgress: {},
       expirationMinutes: 5,
-      isDragging: false
+      isDragging: false,
+      uploadInProgress: false,
+      uploadedCount: 0,
+      totalFilesToUpload: 0,
+      uploadErrors: []
     }
   },
   created() {
@@ -68,13 +107,42 @@ export default {
   },
   methods: {
     onFileSelected(event) {
-      this.selectedFile = event.target.files[0];
+      const newFiles = Array.from(event.target.files || []);
+      this.addFiles(newFiles);
     },
     onDrop(event) {
       this.isDragging = false;
       if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
-        this.selectedFile = event.dataTransfer.files[0];
+        const newFiles = Array.from(event.dataTransfer.files);
+        this.addFiles(newFiles);
       }
+    },
+    addFiles(newFiles) {
+      // 이미 있는 파일 이름 목록 (중복 체크용)
+      const existingFileNames = this.selectedFiles.map(f => f.name);
+      
+      // 중복이 아닌 파일만 추가
+      newFiles.forEach(file => {
+        if (!existingFileNames.includes(file.name)) {
+          this.selectedFiles.push(file);
+          this.fileProgress[this.selectedFiles.length - 1] = 0;
+        }
+      });
+    },
+    removeFile(index) {
+      this.selectedFiles.splice(index, 1);
+      // 진행 상태 배열도 업데이트
+      const newProgress = {};
+      this.selectedFiles.forEach((_, idx) => {
+        newProgress[idx] = this.fileProgress[idx] || 0;
+      });
+      this.fileProgress = newProgress;
+    },
+    clearFiles() {
+      this.selectedFiles = [];
+      this.fileProgress = {};
+      this.uploadedCount = 0;
+      this.uploadErrors = [];
     },
     handleDragEnter(event) {
       event.preventDefault();
@@ -88,26 +156,75 @@ export default {
         this.isDragging = false;
       }
     },
-    async uploadFile() {
-      if (!this.selectedFile) return;
+    formatFileSize(bytes) {
+      if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
+      if (bytes < 1024) return bytes + ' B';
+      else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      else return (bytes / 1048576).toFixed(1) + ' MB';
+    },
+    async uploadFiles() {
+      if (this.selectedFiles.length === 0 || this.uploadInProgress) return;
       
-      // 디버깅 로그 추가
-      console.log('업로드 시작할 파일:', {
-        name: this.selectedFile.name,
-        type: this.selectedFile.type,
-        size: this.selectedFile.size
-      });
-      console.log('선택된 유지 기간(분):', this.expirationMinutes, '타입:', typeof this.expirationMinutes);
+      this.uploadInProgress = true;
+      this.uploadedCount = 0;
+      this.totalFilesToUpload = this.selectedFiles.length;
+      this.uploadErrors = [];
       
-      const formData = new FormData();
-      formData.append('file', this.selectedFile);
-      // 명시적으로 숫자 변환 후 추가
-      const minutes = parseInt(this.expirationMinutes, 10);
-      formData.append('expire_in_minutes', minutes);
+      // 동시 업로드 수 제한 (최대 3개 동시 업로드)
+      const maxConcurrent = 3;
+      const queue = [...this.selectedFiles];
+      const activeUploads = new Set();
       
-      console.log('FormData expire_in_minutes 값:', minutes, '타입:', typeof minutes);
+      const processQueue = async () => {
+        // 큐가 비었고 진행중인 업로드가 없으면 완료
+        if (queue.length === 0 && activeUploads.size === 0) {
+          this.uploadInProgress = false;
+          
+          // 업로드가 완료되면 파일 목록 페이지로 이동
+          if (this.uploadedCount > 0) {
+            setTimeout(() => {
+              this.$router.push({
+                path: '/files/',
+                query: { 
+                  upload_complete: 'true',
+                  count: this.uploadedCount
+                }
+              });
+              this.$emit('upload-complete');
+            }, 500);
+          }
+          return;
+        }
+        
+        // 큐에 파일이 있고, 동시 업로드 수에 여유가 있으면 업로드 시작
+        while (queue.length > 0 && activeUploads.size < maxConcurrent) {
+          const fileIndex = this.selectedFiles.indexOf(queue[0]);
+          const file = queue.shift();
+          
+          if (fileIndex === -1) continue; // 파일이 이미 제거됨
+          
+          activeUploads.add(fileIndex);
+          this.uploadFile(file, fileIndex).finally(() => {
+            activeUploads.delete(fileIndex);
+            // 큐 계속 처리
+            processQueue();
+          });
+        }
+      };
       
+      // 큐 처리 시작
+      processQueue();
+    },
+    async uploadFile(file, index) {
       try {
+        console.log(`파일 "${file.name}" 업로드 시작`);
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        // 명시적으로 숫자 변환 후 추가
+        const minutes = parseInt(this.expirationMinutes, 10);
+        formData.append('expire_in_minutes', minutes);
+        
         // 업로드 요청 전송 시 URL 파라미터로도 추가
         const url = `/upload/?expire_in_minutes=${minutes}`;
         const response = await axios.post(url, formData, {
@@ -115,28 +232,25 @@ export default {
             'Content-Type': 'multipart/form-data'
           },
           onUploadProgress: progressEvent => {
-            this.uploadProgress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            this.fileProgress[index] = percentCompleted;
           }
         });
         
-        // 업로드 응답 로깅
-        console.log('업로드 응답:', response.data);
-        
-        if (response.data.success) {
-          // 파일 목록 페이지로 이동하기 전에 500ms 지연
-          setTimeout(() => {
-            this.$router.push({
-              path: '/files/',
-              query: { upload_complete: 'true' }
-            });
-            this.$emit('upload-complete');
-          }, 500);
+        if (response.data && response.data.success) {
+          console.log(`파일 "${file.name}" 업로드 성공`);
+          this.uploadedCount++;
+        } else {
+          throw new Error(`업로드 실패: ${response.data?.message || '알 수 없는 오류'}`);
         }
       } catch (error) {
-        console.error('Error uploading file:', error);
-        if (error.response) {
-          //console.error('서버 응답:', error.response.data);
-        }
+        console.error(`파일 "${file.name}" 업로드 실패:`, error);
+        this.uploadErrors.push({
+          file: file.name,
+          error: error.message || '알 수 없는 오류'
+        });
+        // 실패해도 업로드 시도 횟수는 증가
+        this.uploadedCount++;
       }
     }
   }
@@ -154,7 +268,7 @@ export default {
   background-color: #fff;
 }
 
-h2 {
+h2, h3 {
   text-align: center;
   margin-bottom: 20px;
   color: #333;
@@ -187,24 +301,93 @@ h2 {
   transition: background-color 0.3s;
 }
 
-.upload-button:hover {
+.upload-button:hover:not(:disabled) {
   background-color: #388e3c;
 }
 
-.file-info {
+.upload-button:disabled {
+  background-color: #a5d6a7;
+  cursor: not-allowed;
+}
+
+.clear-button {
+  background-color: #f44336;
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  margin: 10px 0 10px 10px;
+  transition: background-color 0.3s;
+}
+
+.clear-button:hover:not(:disabled) {
+  background-color: #d32f2f;
+}
+
+.clear-button:disabled {
+  background-color: #ef9a9a;
+  cursor: not-allowed;
+}
+
+.files-list {
   background-color: #f5f5f5;
   padding: 15px;
   border-radius: 5px;
   margin-bottom: 20px;
 }
 
-.progress-bar {
-  height: 20px;
-  background-color: #e0e0e0;
-  border-radius: 10px;
-  overflow: hidden;
+.selected-files-container {
+  max-height: 300px;
+  overflow-y: auto;
+  margin: 15px 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background-color: white;
+}
+
+.file-item {
+  padding: 10px 15px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   position: relative;
-  margin-top: 15px;
+}
+
+.file-item:last-child {
+  border-bottom: none;
+}
+
+.file-item-info {
+  flex: 1;
+  overflow: hidden;
+  margin-right: 10px;
+}
+
+.file-name {
+  font-weight: bold;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  display: block;
+}
+
+.file-size {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.progress-container {
+  height: 10px;
+  background-color: #e0e0e0;
+  border-radius: 5px;
+  overflow: hidden;
+  margin-top: 5px;
+  flex: 1;
+  position: relative;
+  margin-right: 10px;
 }
 
 .progress {
@@ -213,16 +396,37 @@ h2 {
   transition: width 0.3s;
 }
 
-.progress-bar span {
+.progress-text {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  text-align: center;
-  line-height: 20px;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: #333;
+}
+
+.remove-button {
+  background-color: #f44336;
   color: white;
-  text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
-  font-size: 12px;
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  line-height: 24px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 16px;
+  transition: background-color 0.3s;
+  flex-shrink: 0;
+}
+
+.remove-button:hover:not(:disabled) {
+  background-color: #d32f2f;
+}
+
+.remove-button:disabled {
+  background-color: #e57373;
+  cursor: not-allowed;
 }
 
 .expiration-selector {
@@ -241,6 +445,19 @@ h2 {
   border-radius: 4px;
   border: 1px solid #ccc;
   background-color: white;
+}
+
+.upload-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 15px;
+}
+
+.upload-summary {
+  text-align: center;
+  margin-top: 15px;
+  font-weight: bold;
+  color: #4caf50;
 }
 
 .drag-overlay {
