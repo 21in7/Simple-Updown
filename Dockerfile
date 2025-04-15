@@ -45,6 +45,15 @@ RUN echo "Storage Type: ${STORAGE_TYPE}" > /app/static/version.txt && \
     echo "Build Date: ${BUILD_DATE}" >> /app/static/version.txt && \
     echo "Version: ${VERSION}" >> /app/static/version.txt
 
+# Create a non-root user and group
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Set permissions for app directories
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 # Expose API port
 EXPOSE 9000
 
