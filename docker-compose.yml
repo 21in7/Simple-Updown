@@ -5,6 +5,8 @@ services:
       - "9000:9000"
     volumes:
       - ${UPLOAD_PATH:-./uploads}:/app/uploads
+    environment:
+      - STORAGE_TYPE = # R2 or local
     restart: unless-stopped
     container_name: file-storage-app
     networks:
