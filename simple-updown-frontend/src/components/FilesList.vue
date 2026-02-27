@@ -69,171 +69,128 @@
     </div>
   </template>
   
-  <script>
-  import { fetchFiles, deleteFile as apiDeleteFile, getDownloadUrl, getThumbnailUrl } from '@/api/filesApi'
-  import { formatFileSize, getFileIcon, isImageFile } from '@/utils/fileUtils'
-  import { isUnlimited, isExpiringSoon, getTimeLeft, formatDate } from '@/utils/dateUtils'
+<script setup>
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { fetchFiles as apiFetchFiles, deleteFile as apiDeleteFile, getDownloadUrl, getThumbnailUrl as apiGetThumbnailUrl } from '@/api/filesApi'
+import { formatFileSize, getFileIcon, isImageFile } from '@/utils/fileUtils'
+import { isUnlimited, isExpiringSoon, getTimeLeft, formatDate } from '@/utils/dateUtils'
 
-  export default {
-    name: 'FilesList',
-    data() {
-      return {
-        files: [],
-        loading: true,
-        refreshInterval: null,
-        showCopyAlert: false,
-        showMultiUploadMessage: false,
-        uploadCompleteMessage: ''
-      }
-    },
-    computed: {
-      filteredFiles() {
-        const now = new Date();
-        return this.files.filter(file => {
-          try {
-            const expireTime = new Date(file.expire_time.endsWith('Z') ? file.expire_time : file.expire_time + 'Z');
-            return expireTime > now;
-          } catch (e) {
-            return false;
-          }
-        });
-      }
-    },
-    mounted() {
-      this.fetchFiles();
-      // 1분마다 파일 목록 새로고침 (만료된 파일 자동 필터링)
-      this.refreshInterval = setInterval(() => {
-        this.fetchFiles();
-      }, 60000);
+const route = useRoute()
+const router = useRouter()
 
-      // URL 쿼리에서 업로드 완료 정보 확인
-      const query = this.$route.query;
-      if (query.upload_complete === 'true') {
-        // 쿼리 파라미터에서 업로드 된 파일 수 확인
-        const count = query.count ? parseInt(query.count, 10) : 1;
-        
-        // 다중 업로드 메시지 표시
-        if (count > 1) {
-          this.uploadCompleteMessage = `${count}개의 파일이 성공적으로 업로드되었습니다.`;
-          this.showMultiUploadMessage = true;
-        } else {
-          this.uploadCompleteMessage = "파일이 성공적으로 업로드되었습니다.";
-          this.showMultiUploadMessage = true;
-        }
-        
-        // 3초 후 메시지 숨기기
-        setTimeout(() => {
-          this.showMultiUploadMessage = false;
-          
-          // URL에서 쿼리 파라미터 제거
-          this.$router.replace({ 
-            path: this.$route.path,
-            query: {}
-          });
-        }, 3000);
-      }
-    },
-    beforeUnmount() {
-      // 컴포넌트 언마운트 시 인터벌 정리
-      if (this.refreshInterval) {
-        clearInterval(this.refreshInterval);
-      }
-    },
-    methods: {
-      async fetchFiles() {
-        try {
-          const data = await fetchFiles();
-          if (data && data.files) {
-            this.files = data.files.filter(file =>
-              file && file.file_name && file.file_size > 0 && file.hash && file.hash.sha256
-            );
-          } else {
-            this.files = [];
-          }
-        } catch (error) {
-          this.files = [];
-        } finally {
-          this.loading = false;
-        }
-      },
-      isImageFile,
-      getFileIcon,
-      formatFileSize,
-      isUnlimited,
-      isExpiringSoon,
-      getTimeLeft,
-      formatDate,
-      getThumbnailUrl(fileHash) {
-        return getThumbnailUrl(fileHash) + '?width=80&height=80';
-      },
-      // 썸네일 로드 실패 시 처리
-      onThumbnailError(event) {
-        event.target.style.display = 'none';
-        event.target.nextElementSibling.style.display = 'block';
-      },
-      // 파일 공유 링크 생성 및 클립보드 복사
-      async shareFile(file) {
-        try {
-          const shareUrl = `${window.location.origin}/download/${file.hash.sha256}`;
-          await navigator.clipboard.writeText(shareUrl);
-          
-          // 성공 알림 표시
-          this.showCopyAlert = true;
-          setTimeout(() => {
-            this.showCopyAlert = false;
-          }, 2000);
-        } catch (error) {
-          alert('링크 복사에 실패했습니다. 브라우저에서 클립보드 접근을 허용해주세요.');
-        }
-      },
-      downloadFile(file) {
-        const link = document.createElement('a');
-        link.href = getDownloadUrl(file.hash.sha256);
-        link.download = file.file_name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      },
-      async deleteFile(fileHash) {
-        if (!confirm('이 파일을 삭제하시겠습니까?')) return;
-        try {
-          await apiDeleteFile(fileHash);
-          this.files = this.files.filter(file => file.hash.sha256 !== fileHash);
-        } catch (error) {
-          alert('파일 삭제 중 오류가 발생했습니다.');
-        }
-      },
-      getExpirationText(minutes) {
-        if (!minutes || isNaN(parseInt(minutes, 10))) return '';
-        
-        const mins = parseInt(minutes, 10);
-        // console.log('expire_minutes 원본값:', minutes, '타입:', typeof minutes, '변환후:', mins);
-        
-        // 무제한인 경우
-        if (mins === -1) {
-          return '무제한';
-        }
-        
-        if (mins < 60) {
-          return `${mins}분`;
-        } else if (mins < 1440) {
-          return `${Math.floor(mins / 60)}시간`;
-        } else if (mins < 10080) {
-          return `${Math.floor(mins / 1440)}일`;
-        } else {
-          return `${Math.floor(mins / 10080)}주`;
-        }
-      },
-      displayUploadMessage(message) {
-        this.showMultiUploadMessage = true;
-        this.uploadCompleteMessage = message;
-      },
-      dismissUploadMessage() {
-        this.showMultiUploadMessage = false;
-      }
+const files = ref([])
+const loading = ref(true)
+const showCopyAlert = ref(false)
+const showMultiUploadMessage = ref(false)
+const uploadCompleteMessage = ref('')
+
+const filteredFiles = computed(() => {
+  const now = new Date()
+  return files.value.filter(file => {
+    try {
+      const expireTime = new Date(file.expire_time.endsWith('Z') ? file.expire_time : file.expire_time + 'Z')
+      return expireTime > now
+    } catch {
+      return false
     }
+  })
+})
+
+async function loadFiles() {
+  try {
+    const data = await apiFetchFiles()
+    if (data && data.files) {
+      files.value = data.files.filter(file =>
+        file && file.file_name && file.file_size > 0 && file.hash && file.hash.sha256
+      )
+    } else {
+      files.value = []
+    }
+  } catch {
+    files.value = []
+  } finally {
+    loading.value = false
   }
-  </script>
+}
+
+function getThumbnailUrl(fileHash) {
+  return apiGetThumbnailUrl(fileHash) + '?width=80&height=80'
+}
+
+function onThumbnailError(event) {
+  event.target.style.display = 'none'
+  event.target.nextElementSibling.style.display = 'block'
+}
+
+async function shareFile(file) {
+  try {
+    const shareUrl = `${window.location.origin}/download/${file.hash.sha256}`
+    await navigator.clipboard.writeText(shareUrl)
+    showCopyAlert.value = true
+    setTimeout(() => { showCopyAlert.value = false }, 2000)
+  } catch {
+    alert('링크 복사에 실패했습니다. 브라우저에서 클립보드 접근을 허용해주세요.')
+  }
+}
+
+function downloadFile(file) {
+  const link = document.createElement('a')
+  link.href = getDownloadUrl(file.hash.sha256)
+  link.download = file.file_name
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
+async function deleteFile(fileHash) {
+  if (!confirm('이 파일을 삭제하시겠습니까?')) return
+  try {
+    await apiDeleteFile(fileHash)
+    files.value = files.value.filter(file => file.hash.sha256 !== fileHash)
+  } catch {
+    alert('파일 삭제 중 오류가 발생했습니다.')
+  }
+}
+
+function getExpirationText(minutes) {
+  if (!minutes || isNaN(parseInt(minutes, 10))) return ''
+  const mins = parseInt(minutes, 10)
+  if (mins === -1) return '무제한'
+  if (mins < 60) return `${mins}분`
+  if (mins < 1440) return `${Math.floor(mins / 60)}시간`
+  if (mins < 10080) return `${Math.floor(mins / 1440)}일`
+  return `${Math.floor(mins / 10080)}주`
+}
+
+function dismissUploadMessage() {
+  showMultiUploadMessage.value = false
+}
+
+let refreshInterval = null
+
+onMounted(() => {
+  loadFiles()
+  refreshInterval = setInterval(loadFiles, 60000)
+
+  const query = route.query
+  if (query.upload_complete === 'true') {
+    const count = query.count ? parseInt(query.count, 10) : 1
+    uploadCompleteMessage.value = count > 1
+      ? `${count}개의 파일이 성공적으로 업로드되었습니다.`
+      : '파일이 성공적으로 업로드되었습니다.'
+    showMultiUploadMessage.value = true
+    setTimeout(() => {
+      showMultiUploadMessage.value = false
+      router.replace({ path: route.path, query: {} })
+    }, 3000)
+  }
+})
+
+onBeforeUnmount(() => {
+  if (refreshInterval) clearInterval(refreshInterval)
+})
+</script>
 
 <style scoped>
 .files-container {
