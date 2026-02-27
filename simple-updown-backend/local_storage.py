@@ -1,23 +1,8 @@
 import os
 import shutil
 import tempfile
-from pathlib import Path
 import time
-import gc
-
-def format_file_size(size_in_bytes):
-    """파일 크기를 사람이 읽기 쉬운 형식으로 변환"""
-    if size_in_bytes is None or not isinstance(size_in_bytes, (int, float)) or size_in_bytes < 0:
-        return "0 B"
-
-    if size_in_bytes < 1024:
-        return f"{size_in_bytes} B"
-    elif size_in_bytes < 1024 * 1024:
-        return f"{size_in_bytes / 1024:.2f} KB"
-    elif size_in_bytes < 1024 * 1024 * 1024:
-        return f"{size_in_bytes / (1024 * 1024):.2f} MB"
-    else:
-        return f"{size_in_bytes / (1024 * 1024 * 1024):.2f} GB"
+from utils import format_file_size
 
 class LocalStorage:
     def __init__(self, upload_dir="/app/uploads"):
@@ -83,14 +68,8 @@ class LocalStorage:
                         out_file.write(chunk)
                         out_file.flush()
                         
-                        # 진행 상황 계산
                         bytes_copied += len(chunk)
                         chunk_count += 1
-                        
-                        # 메모리 정리 (10개 청크마다)
-                        if chunk_count % 10 == 0:
-                            del chunk
-                            gc.collect()
                     
                     print(f"파일 복사 완료: {bytes_copied} 바이트")
                 return True
@@ -141,10 +120,7 @@ class LocalStorage:
                             progress = bytes_copied / total_size * 100 if total_size > 0 else 0
                             print(f"복사 진행률: {progress:.1f}% ({format_file_size(bytes_copied)}/{format_file_size(total_size)}) - {speed:.1f} MB/s")
                         
-                        # 주기적 메모리 관리
-                        if chunk_count % 10 == 0:  # 10개 청크마다
-                            del buf
-                            gc.collect()
+                        chunk_count += 1
             
             # 복사 완료 통계
             elapsed = time.time() - start_time
