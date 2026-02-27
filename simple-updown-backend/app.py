@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import hashlib
+import io
 import tempfile
 import datetime
-import io
 import uuid
 import traceback
 from datetime import timedelta
@@ -294,11 +294,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
                     print(f"업로드 진행 중: {format_file_size(file_size)} 처리됨")
                     processed_size = 0
                 
-                # 주기적으로 명시적 메모리 정리
                 chunk_count += 1
-                if chunk_count % 10 == 0:  # 10개 청크마다
-                    del chunk
-                    gc.collect()
         
         # 진행 상황 최종 출력
         print(f"업로드 완료: 총 {format_file_size(file_size)}")
@@ -312,11 +308,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         sha1_hash = sha1_hash_obj.hexdigest()
         file_hash = sha256_hash_obj.hexdigest()
         
-        # 메모리 최적화: 해시 객체 명시적 삭제
         del md5_hash_obj, sha1_hash_obj, sha256_hash_obj
-        
-        # 메모리 정리
-        gc.collect()
         
         # 파일 업로드 - 임시 파일 경로를 전달하여 스트림으로 처리
         upload_success = storage.upload_file(temp_file_path, file_hash)
@@ -356,9 +348,6 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         base_url = str(request.base_url).rstrip("/")
         share_url = f"{base_url}/download/{file_hash}"
         
-        # 명시적 메모리 정리
-        gc.collect()
-        
         # 최소한의 응답 데이터만 반환
         return {
             "success": True,
@@ -372,10 +361,10 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
                 "share_url": share_url
             }
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        # 에러 로깅
         print(f"파일 업로드 중 오류 발생: {str(e)}")
-        # 스택 트레이스 출력 (디버깅용)
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Error uploading file: {str(e)}")
     finally:
@@ -387,11 +376,7 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
             except Exception as e:
                 print(f"임시 파일 삭제 실패: {str(e)}")
         
-        # FastAPI UploadFile 파일 정리
         await file.close()
-        
-        # 메모리 관리: 명시적 가비지 컬렉션 호출
-        gc.collect()
 
 @app.get("/download/{file_hash}")
 async def download_file(file_hash: str):
@@ -432,59 +417,44 @@ async def download_file(file_hash: str):
             storage.delete_file(file_hash)
             db.delete(doc_id)
             raise HTTPException(status_code=404, detail="File expired and deleted")
-            
+
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"만료 시간 처리 중 오류 발생: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error processing expiration time: {str(e)}")
     
-    # 파일 다운로드 제공
-    try:
-        # 컨텐츠 타입 결정
-        content_type = file_metadata.get("content_type", "application/octet-stream")
-        filename = file_metadata.get("file_name", "unknown")
-        
-        # 스트리밍 처리를 위한 함수
-        def file_streamer():
-            try:
-                if storage_type == "local":
-                    file_path = os.path.join(storage.upload_dir, file_hash)
-                    if os.path.exists(file_path):
-                        # 청크 단위로 스트리밍
-                        with open(file_path, 'rb') as f:
-                            while chunk := f.read(1024 * 1024):  # 1MB 청크
-                                yield chunk
-                    else:
-                        # 메타데이터는 있지만 파일이 없는 경우
-                        print(f"로컬 스토리지에 파일 없음: {file_path}")
-                        db.delete(doc_id)
-                        raise HTTPException(status_code=404, detail="File not found")
-                else:
-                    # R2 스토리지는 StreamingResponse를 활용
-                    stream = storage.get_file_stream(file_hash)
-                    if stream:
-                        for chunk in stream:
-                            yield chunk
-                    else:
-                        # 메타데이터는 있지만 파일이 없는 경우
-                        print(f"R2 스토리지에 파일 없음: {file_hash}")
-                        db.delete(doc_id)
-                        raise HTTPException(status_code=404, detail="File not found")
-            except Exception as e:
-                print(f"파일 스트리밍 중 오류 발생: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Error streaming file: {str(e)}")
-        
-        # 스트리밍 응답 반환
-        return StreamingResponse(
-            file_streamer(),
-            media_type=content_type,
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Cache-Control": "no-cache"
-            }
-        )
-    except Exception as e:
-        print(f"파일 다운로드 중 오류 발생: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+    # 파일 다운로드 제공 — 스트리밍 전 파일 존재 사전 검증
+    content_type = file_metadata.get("content_type", "application/octet-stream")
+    filename = file_metadata.get("file_name", "unknown")
+
+    if not storage.file_exists(file_hash):
+        db.delete(doc_id)
+        raise HTTPException(status_code=404, detail="File not found")
+
+    from urllib.parse import quote
+    encoded_filename = quote(filename, safe='')
+
+    def file_streamer():
+        if storage_type == "local":
+            file_path = os.path.join(storage.upload_dir, file_hash)
+            with open(file_path, 'rb') as f:
+                while chunk := f.read(1024 * 1024):
+                    yield chunk
+        else:
+            stream = storage.get_file_stream(file_hash)
+            if stream:
+                for chunk in stream:
+                    yield chunk
+
+    return StreamingResponse(
+        file_streamer(),
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Cache-Control": "no-cache"
+        }
+    )
 
 @app.delete("/files/{file_hash}")
 async def delete_file(file_hash: str):
@@ -628,133 +598,55 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
             # 캐시 파일 엑세스 오류 시 무시하고 다시 생성
             pass
     
-    # 이미지 데이터 스트림으로 읽기
-    img_data = None
-    
+    # 이미지 포맷 결정
+    img_format = "JPEG"
+    mime_type = "image/jpeg"
+    if file_name.lower().endswith('.png'):
+        img_format = "PNG"
+        mime_type = "image/png"
+    elif file_name.lower().endswith('.gif'):
+        img_format = "GIF"
+        mime_type = "image/gif"
+
     try:
         if storage_type == "local":
             file_path = os.path.join(storage.upload_dir, file_hash)
             if not os.path.exists(file_path):
                 raise HTTPException(status_code=404, detail="Image file not found")
-                
-            # 이미지 포맷 결정
-            img_format = "JPEG"
-            mime_type = "image/jpeg"
-            
-            if file_name.lower().endswith('.png'):
-                img_format = "PNG"
-                mime_type = "image/png"
-            elif file_name.lower().endswith('.gif'):
-                img_format = "GIF"
-                mime_type = "image/gif"
-            
-            try:
-                # 로우 레벨로 이미지 처리 - 메모리 사용량 최적화
-                with Image.open(file_path) as img:
-                    # 큰 이미지는 리사이즈 전에 크기 줄이기
-                    if max(img.width, img.height) > 2000:
-                        # 대략적으로 크기 조정 (메모리 효율을 위해)
-                        factor = 2000 / max(img.width, img.height)
-                        intermediate_size = (int(img.width * factor), int(img.height * factor))
-                        img = img.resize(intermediate_size, Image.LANCZOS)
-                    
-                    # 최종 썸네일 생성
-                    img.thumbnail((width, height), Image.LANCZOS)
-                    
-                    # 알파 채널 처리 (메모리 최적화)
-                    if img.mode == 'RGBA' and img_format == 'JPEG':
-                        img = img.convert('RGB')
-                    
-                    # 썸네일을 캐시 파일로 저장
-                    img.save(thumbnail_path, format=img_format, quality=85, optimize=True)
-                    
-                    # 캐시된 파일 반환
-                    return FileResponse(
-                        thumbnail_path, 
-                        media_type=mime_type,
-                        headers={"Cache-Control": "max-age=3600, public"}  # 1시간 캐싱
-                    )
-            except Exception as e:
-                print(f"썸네일 생성 중 오류: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
+            img_source = file_path
         else:
-            # R2 스토리지는 바이트 데이터로 처리
-            img_data = storage.get_file_bytes(file_hash)
-            if not img_data:
+            img_bytes = storage.get_file_bytes(file_hash)
+            if not img_bytes:
                 raise HTTPException(status_code=404, detail="Image data not found")
-            
-            # 이미지 포맷 결정
-            img_format = "JPEG"
-            mime_type = "image/jpeg"
-            
-            if file_name.lower().endswith('.png'):
-                img_format = "PNG"
-                mime_type = "image/png"
-            elif file_name.lower().endswith('.gif'):
-                img_format = "GIF"
-                mime_type = "image/gif"
-            
-        try:
-            # Pillow 처리 최적화
-            with Image.open(file_path) as img:
-                # 메모리 최적화: 이미지 처리 전 모드 최적화
-                if img.mode not in ('RGB', 'RGBA'):
-                    img = img.convert('RGB')
-                    
-                # 큰 이미지 처리 최적화
-                if max(img.width, img.height) > 2000:
-                    # 단계적 리사이징으로 메모리 사용량 감소
-                    resize_steps = []
-                    current_size = max(img.width, img.height)
-                    target_size = 2000
-                    
-                    # 한 번에 50% 이상 줄이지 않도록 단계 계산
-                    while current_size > target_size * 1.5:
-                        current_size = int(current_size * 0.7)  # 30% 감소
-                        resize_steps.append(current_size)
-                    
-                    # 최종 목표 크기 추가
-                    resize_steps.append(target_size)
-                    
-                    # 단계적으로 크기 줄이기
-                    for step_size in resize_steps:
-                        ratio = step_size / max(img.width, img.height)
-                        new_size = (int(img.width * ratio), int(img.height * ratio))
-                        img = img.resize(new_size, Image.LANCZOS)
-                        
-                        # 각 단계 후 가비지 컬렉션
-                        gc.collect()
-                
-                # 썸네일 생성 (기존 코드 유지)
-                img.thumbnail((width, height), Image.LANCZOS)
-                
-                # 메모리 최적화: 썸네일 저장 최적화
-                save_options = {}
-                if img_format == "JPEG":
-                    save_options = {'quality': 85, 'optimize': True}
-                elif img_format == "PNG":
-                    save_options = {'optimize': True, 'compress_level': 6}
-                
-                # 저장 전 이미지 메모리 최적화
-                if img.mode == 'RGBA' and img_format == 'JPEG':
-                    background = Image.new('RGB', img.size, (255, 255, 255))
-                    background.paste(img, mask=img.split()[3])  # 3이 알파 채널
-                    img = background
-                
-                img.save(thumbnail_path, format=img_format, **save_options)
-                
-                # 이미지 객체 명시적 정리
-                img.close()
-                del img
-                
-                # 가비지 컬렉션
-                gc.collect()
-        except Exception as e:
-            print(f"썸네일 생성 중 오류: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
+            img_source = io.BytesIO(img_bytes)
+
+        with Image.open(img_source) as img:
+            if img.mode not in ('RGB', 'RGBA'):
+                img = img.convert('RGB')
+            if max(img.width, img.height) > 2000:
+                factor = 2000 / max(img.width, img.height)
+                img = img.resize(
+                    (int(img.width * factor), int(img.height * factor)),
+                    Image.LANCZOS
+                )
+            img.thumbnail((width, height), Image.LANCZOS)
+            if img.mode == 'RGBA' and img_format == 'JPEG':
+                background = Image.new('RGB', img.size, (255, 255, 255))
+                background.paste(img, mask=img.split()[3])
+                img = background
+            save_options = {'quality': 85, 'optimize': True} if img_format == 'JPEG' else {'optimize': True}
+            img.save(thumbnail_path, format=img_format, **save_options)
+
+        return FileResponse(
+            thumbnail_path,
+            media_type=mime_type,
+            headers={"Cache-Control": "max-age=3600, public"}
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"이미지 처리 중 오류: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error processing image: {str(e)}")
+        print(f"썸네일 생성 중 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
 
 # 파라미터 테스트 엔드포인트
 @app.get("/api/test-param")
