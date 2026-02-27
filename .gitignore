@@ -16,3 +16,7 @@ git.sh
 
 # git worktrees
 .worktrees/
+
+# 로컬 개발 시 생성되는 데이터 디렉토리
+simple-updown-backend/data/
+simple-updown-backend/uploads/

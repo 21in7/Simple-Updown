@@ -5,9 +5,14 @@ import time
 from typing import Optional, Generator
 from utils import format_file_size
 
+_DEFAULT_UPLOAD_DIR = os.getenv(
+    "UPLOAD_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+)
+
 
 class LocalStorage:
-    def __init__(self, upload_dir: str = "/app/uploads") -> None:
+    def __init__(self, upload_dir: str = _DEFAULT_UPLOAD_DIR) -> None:
         self.upload_dir = upload_dir
         os.makedirs(upload_dir, exist_ok=True)
 

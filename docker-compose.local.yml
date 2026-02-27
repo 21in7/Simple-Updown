@@ -8,6 +8,8 @@ services:
       - ${UPLOAD_PATH:-./uploads}:/app/uploads
     environment:
       - STORAGE_TYPE=local
+      - DB_PATH=/app/data/file_metadata.db
+      - UPLOAD_DIR=/app/uploads
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/api/files/"]

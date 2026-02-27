@@ -3,7 +3,7 @@ import uuid
 import os
 from typing import Optional, Dict, Any, Tuple
 
-DB_PATH = os.getenv("DB_PATH", "/app/data/file_metadata.db")
+DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "file_metadata.db"))
 
 
 class FileMetadataDB:
