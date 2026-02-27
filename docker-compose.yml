@@ -1,19 +1,21 @@
 services:
   app:
     image: gihyeon21/simple-updown:latest
+    container_name: simple-updown
     ports:
-      - "9000:9000"
+      - "${PORT:-9000}:9000"
     volumes:
       - ${UPLOAD_PATH:-./uploads}:/app/uploads
     environment:
-      - STORAGE_TYPE = # R2 or local
+      - STORAGE_TYPE=${STORAGE_TYPE:-local}
     restart: unless-stopped
-    container_name: file-storage-app
-    networks:
-      - app-network
-
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/api/files/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
-  app-network:
-    driver: bridge
-
+  default:
+    name: simple-updown-network
