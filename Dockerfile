@@ -32,7 +32,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY simple-updown-backend/ .
 
-RUN mkdir -p /app/static /app/uploads /app/thumbnails
+RUN mkdir -p /app/static /app/uploads /app/thumbnails /app/data
 
 COPY --from=frontend-builder /app/frontend/dist/ /app/static/
 

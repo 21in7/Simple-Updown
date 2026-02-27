@@ -6,6 +6,7 @@ services:
       - "${PORT:-9000}:9000"
     volumes:
       - ${UPLOAD_PATH:-./uploads}:/app/uploads
+      - ${DATA_PATH:-./data}:/app/data
     environment:
       - STORAGE_TYPE=local
       - DB_PATH=/app/data/file_metadata.db

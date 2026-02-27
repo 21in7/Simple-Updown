@@ -6,6 +6,7 @@ services:
       - "${PORT:-9000}:9000"
     volumes:
       - ${TEMP_UPLOAD_PATH:-./temp_uploads}:/app/uploads
+      - ${DATA_PATH:-./data}:/app/data
     env_file:
       - .env
     environment:
