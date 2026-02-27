@@ -124,14 +124,22 @@ function onThumbnailError(event) {
 }
 
 async function shareFile(file) {
+  const shareUrl = `${window.location.origin}/download/${file.hash.sha256}`
   try {
-    const shareUrl = `${window.location.origin}/download/${file.hash.sha256}`
     await navigator.clipboard.writeText(shareUrl)
-    showCopyAlert.value = true
-    setTimeout(() => { showCopyAlert.value = false }, 2000)
   } catch {
-    alert('링크 복사에 실패했습니다. 브라우저에서 클립보드 접근을 허용해주세요.')
+    // HTTP 환경 등 Clipboard API 미지원 시 execCommand 폴백
+    const textarea = document.createElement('textarea')
+    textarea.value = shareUrl
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
   }
+  showCopyAlert.value = true
+  setTimeout(() => { showCopyAlert.value = false }, 2000)
 }
 
 function downloadFile(file) {
