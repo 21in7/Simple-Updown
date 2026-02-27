@@ -4,7 +4,7 @@ FROM --platform=${BUILDPLATFORM:-linux/amd64} node:20-slim AS frontend-builder
 WORKDIR /app/frontend
 
 COPY simple-updown-frontend/package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 COPY simple-updown-frontend/ .
 RUN npm run build
 
