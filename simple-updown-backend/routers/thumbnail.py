@@ -2,20 +2,10 @@ import os
 import io
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from database import FileMetadataDB
-from local_storage import LocalStorage
-from r2_storage import R2Storage
+from dependencies import db, storage, storage_type
 from utils import is_image_file, is_image_content_type
 
 router = APIRouter()
-
-storage_type = os.getenv("STORAGE_TYPE", "local")
-if storage_type == "local":
-    storage = LocalStorage()
-else:
-    storage = R2Storage()
-
-db = FileMetadataDB()
 
 try:
     from PIL import Image

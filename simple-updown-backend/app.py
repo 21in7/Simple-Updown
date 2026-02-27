@@ -1,4 +1,3 @@
-import os
 from dotenv import load_dotenv
 
 # 반드시 스토리지 초기화 전에 호출
@@ -11,18 +10,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from database import FileMetadataDB
-from local_storage import LocalStorage
-from r2_storage import R2Storage
+from dependencies import db, storage
 from routers import files, upload, download, thumbnail
-
-storage_type = os.getenv("STORAGE_TYPE", "local")
-if storage_type == "local":
-    storage = LocalStorage()
-else:
-    storage = R2Storage()
-
-db = FileMetadataDB()
 
 
 async def cleanup_orphaned_files():
