@@ -2,12 +2,15 @@
 # Main FastAPI application for file upload/download with R2 storage
 
 import os
+from dotenv import load_dotenv
+
+# 반드시 스토리지 초기화 전에 호출
+load_dotenv()
+
 import hashlib
 import tempfile
 import datetime
-import pyshorteners
 import io
-import gc
 import uuid
 import traceback
 from datetime import timedelta
@@ -17,7 +20,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.background import BackgroundScheduler
-from dotenv import load_dotenv
 from database import FileMetadataDB
 from r2_storage import R2Storage
 from local_storage import LocalStorage
@@ -29,16 +31,13 @@ except ImportError:
     Image = None
 
 # 환경 변수로 스토리지 타입 지정
-storage_type = os.environ.get("STORAGE_TYPE", "local")
+storage_type = os.getenv("STORAGE_TYPE", "local")
 
 # 스토리지 인스턴스 생성
 if storage_type == "local":
     storage = LocalStorage()
 else:
     storage = R2Storage()
-
-# Load environment variables
-load_dotenv()
 
 # 파일 크기 포맷팅 함수
 def format_file_size(size_in_bytes):
@@ -69,7 +68,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 db = FileMetadataDB()
-r2 = R2Storage()
 
 app.add_middleware(
     CORSMiddleware,
