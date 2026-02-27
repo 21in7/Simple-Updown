@@ -13,3 +13,6 @@ templates
 
 # .sh
 git.sh
+
+# git worktrees
+.worktrees/

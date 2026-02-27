@@ -1,22 +1,23 @@
-version: '3'
-
 services:
   app:
-    image: gihyeon21/simple-updown:r2
+    image: gihyeon21/simple-updown:r2-latest
+    container_name: simple-updown-r2
     ports:
-      - "9000:9000"
+      - "${PORT:-9000}:9000"
     volumes:
       - ${TEMP_UPLOAD_PATH:-./temp_uploads}:/app/uploads
     env_file:
       - .env
+    environment:
+      - STORAGE_TYPE=r2
     restart: unless-stopped
-    container_name: file-storage-app-r2
-    networks:
-      - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/api/files/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 networks:
-  app-network:
-    driver: bridge
-
-volumes:
-  file_metadata:
+  default:
+    name: simple-updown-network

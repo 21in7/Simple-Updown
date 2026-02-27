@@ -9,7 +9,7 @@
         style="display: none"
         multiple
       />
-      <button @click="$refs.fileInput.click()" class="upload-button">
+      <button @click="fileInput.click()" class="upload-button">
         파일 선택
       </button>
       <p>또는 파일을 여기에 드래그 앤 드롭하세요 (여러 파일 가능)</p>
@@ -20,7 +20,7 @@
       
       <div class="expiration-selector">
         <label for="expiration-time">유지 기간:</label>
-        <select id="expiration-time" v-model.number="expirationMinutes">
+        <select id="expiration-time" v-model="expirationMinutes">
           <option :value="5">5분</option>
           <option :value="60">1시간</option>
           <option :value="1440">1일</option>
@@ -69,6 +69,12 @@
       <div v-if="uploadedCount > 0" class="upload-summary">
         {{ uploadedCount }}/{{ totalFilesToUpload }} 파일 업로드 완료
       </div>
+
+      <div v-if="uploadErrors.length > 0" class="upload-errors">
+        <p v-for="err in uploadErrors" :key="err.file" class="error-item">
+          ⚠️ {{ err.file }}: {{ err.error }}
+        </p>
+      </div>
     </div>
     
     <div v-if="isDragging" class="drag-overlay">
@@ -80,181 +86,136 @@
   </div>
 </template>
 
-<script>
-import axios from 'axios';
+<script setup>
+import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
+import { uploadFile as apiUploadFile } from '@/api/filesApi'
+import { formatFileSize } from '@/utils/fileUtils'
 
-export default {
-  name: 'FileUpload',
-  data() {
-    return {
-      selectedFiles: [],
-      fileProgress: {},
-      expirationMinutes: 5,
-      isDragging: false,
-      uploadInProgress: false,
-      uploadedCount: 0,
-      totalFilesToUpload: 0,
-      uploadErrors: []
-    }
-  },
-  created() {
-    window.addEventListener('dragenter', this.handleDragEnter)
-    window.addEventListener('dragleave', this.handleDragLeave)
-  },
-  beforeUnmount() {
-    window.removeEventListener('dragenter', this.handleDragEnter)
-    window.removeEventListener('dragleave', this.handleDragLeave)
-  },
-  methods: {
-    onFileSelected(event) {
-      const newFiles = Array.from(event.target.files || []);
-      this.addFiles(newFiles);
-    },
-    onDrop(event) {
-      this.isDragging = false;
-      if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
-        const newFiles = Array.from(event.dataTransfer.files);
-        this.addFiles(newFiles);
-      }
-    },
-    addFiles(newFiles) {
-      // 이미 있는 파일 이름 목록 (중복 체크용)
-      const existingFileNames = this.selectedFiles.map(f => f.name);
-      
-      // 중복이 아닌 파일만 추가
-      newFiles.forEach(file => {
-        if (!existingFileNames.includes(file.name)) {
-          this.selectedFiles.push(file);
-          this.fileProgress[this.selectedFiles.length - 1] = 0;
-        }
-      });
-    },
-    removeFile(index) {
-      this.selectedFiles.splice(index, 1);
-      // 진행 상태 배열도 업데이트
-      const newProgress = {};
-      this.selectedFiles.forEach((_, idx) => {
-        newProgress[idx] = this.fileProgress[idx] || 0;
-      });
-      this.fileProgress = newProgress;
-    },
-    clearFiles() {
-      this.selectedFiles = [];
-      this.fileProgress = {};
-      this.uploadedCount = 0;
-      this.uploadErrors = [];
-    },
-    handleDragEnter(event) {
-      event.preventDefault();
-      this.isDragging = true;
-    },
-    handleDragLeave(event) {
-      event.preventDefault();
-      // 실제 페이지 떠날 때만 드래그 오버레이 숨기기
-      if (!event.relatedTarget || 
-          event.relatedTarget.nodeName === 'HTML') {
-        this.isDragging = false;
-      }
-    },
-    formatFileSize(bytes) {
-      if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
-      if (bytes < 1024) return bytes + ' B';
-      else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-      else return (bytes / 1048576).toFixed(1) + ' MB';
-    },
-    async uploadFiles() {
-      if (this.selectedFiles.length === 0 || this.uploadInProgress) return;
-      
-      this.uploadInProgress = true;
-      this.uploadedCount = 0;
-      this.totalFilesToUpload = this.selectedFiles.length;
-      this.uploadErrors = [];
-      
-      // 동시 업로드 수 제한 (최대 3개 동시 업로드)
-      const maxConcurrent = 3;
-      const queue = [...this.selectedFiles];
-      const activeUploads = new Set();
-      
-      const processQueue = async () => {
-        // 큐가 비었고 진행중인 업로드가 없으면 완료
-        if (queue.length === 0 && activeUploads.size === 0) {
-          this.uploadInProgress = false;
-          
-          // 업로드가 완료되면 파일 목록 페이지로 이동
-          if (this.uploadedCount > 0) {
-            setTimeout(() => {
-              this.$router.push({
-                path: '/files/',
-                query: { 
-                  upload_complete: 'true',
-                  count: this.uploadedCount
-                }
-              });
-              this.$emit('upload-complete');
-            }, 500);
-          }
-          return;
-        }
-        
-        // 큐에 파일이 있고, 동시 업로드 수에 여유가 있으면 업로드 시작
-        while (queue.length > 0 && activeUploads.size < maxConcurrent) {
-          const fileIndex = this.selectedFiles.indexOf(queue[0]);
-          const file = queue.shift();
-          
-          if (fileIndex === -1) continue; // 파일이 이미 제거됨
-          
-          activeUploads.add(fileIndex);
-          this.uploadFile(file, fileIndex).finally(() => {
-            activeUploads.delete(fileIndex);
-            // 큐 계속 처리
-            processQueue();
-          });
-        }
-      };
-      
-      // 큐 처리 시작
-      processQueue();
-    },
-    async uploadFile(file, index) {
-      try {
-        console.log(`파일 "${file.name}" 업로드 시작`);
-        
-        const formData = new FormData();
-        formData.append('file', file);
-        // 명시적으로 숫자 변환 후 추가
-        const minutes = parseInt(this.expirationMinutes, 10);
-        formData.append('expire_in_minutes', minutes);
-        
-        // 업로드 요청 전송 시 URL 파라미터로도 추가
-        const url = `/upload/?expire_in_minutes=${minutes}`;
-        const response = await axios.post(url, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
-          onUploadProgress: progressEvent => {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            this.fileProgress[index] = percentCompleted;
-          }
-        });
-        
-        if (response.data && response.data.success) {
-          console.log(`파일 "${file.name}" 업로드 성공`);
-          this.uploadedCount++;
-        } else {
-          throw new Error(`업로드 실패: ${response.data?.message || '알 수 없는 오류'}`);
-        }
-      } catch (error) {
-        console.error(`파일 "${file.name}" 업로드 실패:`, error);
-        this.uploadErrors.push({
-          file: file.name,
-          error: error.message || '알 수 없는 오류'
-        });
-        // 실패해도 업로드 시도 횟수는 증가
-        this.uploadedCount++;
-      }
-    }
+const emit = defineEmits(['upload-complete'])
+const router = useRouter()
+
+const fileInput = ref(null)
+const selectedFiles = ref([])
+const fileProgress = ref({})
+const expirationMinutes = ref(5)
+const isDragging = ref(false)
+const uploadInProgress = ref(false)
+const uploadedCount = ref(0)
+const totalFilesToUpload = ref(0)
+const uploadErrors = ref([])
+
+function onFileSelected(event) {
+  addFiles(Array.from(event.target.files || []))
+}
+
+function onDrop(event) {
+  isDragging.value = false
+  if (event.dataTransfer.files && event.dataTransfer.files.length > 0) {
+    addFiles(Array.from(event.dataTransfer.files))
   }
 }
+
+function addFiles(newFiles) {
+  const existingNames = selectedFiles.value.map(f => f.name)
+  newFiles.forEach(file => {
+    if (!existingNames.includes(file.name)) {
+      selectedFiles.value.push(file)
+      fileProgress.value[selectedFiles.value.length - 1] = 0
+    }
+  })
+}
+
+function removeFile(index) {
+  selectedFiles.value.splice(index, 1)
+  const newProgress = {}
+  selectedFiles.value.forEach((_, idx) => {
+    newProgress[idx] = fileProgress.value[idx] || 0
+  })
+  fileProgress.value = newProgress
+}
+
+function clearFiles() {
+  selectedFiles.value = []
+  fileProgress.value = {}
+  uploadedCount.value = 0
+  uploadErrors.value = []
+}
+
+function handleDragEnter(event) {
+  event.preventDefault()
+  isDragging.value = true
+}
+
+function handleDragLeave(event) {
+  event.preventDefault()
+  if (!event.relatedTarget || event.relatedTarget.nodeName === 'HTML') {
+    isDragging.value = false
+  }
+}
+
+async function uploadSingleFile(file, index) {
+  try {
+    const data = await apiUploadFile(file, expirationMinutes.value, progressEvent => {
+      const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+      fileProgress.value[index] = percentCompleted
+    })
+    if (data && data.success) {
+      uploadedCount.value++
+    } else {
+      throw new Error(`업로드 실패: ${data?.message || '알 수 없는 오류'}`)
+    }
+  } catch (error) {
+    uploadErrors.value.push({ file: file.name, error: error.message || '알 수 없는 오류' })
+  }
+}
+
+async function uploadFiles() {
+  if (selectedFiles.value.length === 0 || uploadInProgress.value) return
+  uploadInProgress.value = true
+  uploadedCount.value = 0
+  totalFilesToUpload.value = selectedFiles.value.length
+  uploadErrors.value = []
+
+  const maxConcurrent = 3
+  const queue = [...selectedFiles.value]
+  const activeUploads = new Set()
+
+  const processQueue = async () => {
+    if (queue.length === 0 && activeUploads.size === 0) {
+      uploadInProgress.value = false
+      if (uploadedCount.value > 0) {
+        setTimeout(() => {
+          router.push({ path: '/files/', query: { upload_complete: 'true', count: uploadedCount.value } })
+          emit('upload-complete')
+        }, 500)
+      }
+      return
+    }
+    while (queue.length > 0 && activeUploads.size < maxConcurrent) {
+      const fileIndex = selectedFiles.value.indexOf(queue[0])
+      const file = queue.shift()
+      if (fileIndex === -1) continue
+      activeUploads.add(fileIndex)
+      uploadSingleFile(file, fileIndex).finally(() => {
+        activeUploads.delete(fileIndex)
+        processQueue()
+      })
+    }
+  }
+
+  processQueue()
+}
+
+onMounted(() => {
+  window.addEventListener('dragenter', handleDragEnter)
+  window.addEventListener('dragleave', handleDragLeave)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('dragenter', handleDragEnter)
+  window.removeEventListener('dragleave', handleDragLeave)
+})
 </script>
 
 <style scoped>
@@ -458,6 +419,20 @@ h2, h3 {
   margin-top: 15px;
   font-weight: bold;
   color: #4caf50;
+}
+
+.upload-errors {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #fff3f3;
+  border: 1px solid #f44336;
+  border-radius: 4px;
+}
+
+.error-item {
+  color: #f44336;
+  font-size: 0.9em;
+  margin: 4px 0;
 }
 
 .drag-overlay {

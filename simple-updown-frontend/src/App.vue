@@ -17,15 +17,12 @@
       <router-view></router-view>
     </main>
     <footer>
-      <p>© 2025 Simple Upload/Download Service</p>
+      <p>© {{ new Date().getFullYear() }} Simple Upload/Download Service</p>
     </footer>
   </div>
 </template>
 
-<script>
-export default {
-  name: 'App'
-}
+<script setup>
 </script>
 
 <style>

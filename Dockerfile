@@ -1,61 +1,49 @@
-# Frontend build stage
-FROM --platform=${BUILDPLATFORM:-linux/amd64} node:16 AS frontend-builder
+# ── 1단계: 프론트엔드 빌드 ──────────────────────────────────────────────────────
+FROM --platform=${BUILDPLATFORM:-linux/amd64} node:20-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
-# Install dependencies and build the frontend
 COPY simple-updown-frontend/package*.json ./
-RUN npm install
+RUN npm ci --omit=dev
 COPY simple-updown-frontend/ .
 RUN npm run build
 
-# Backend build stage
+# ── 2단계: 런타임 ────────────────────────────────────────────────────────────────
 FROM --platform=${TARGETPLATFORM:-linux/amd64} python:3.12-slim
+
+ARG STORAGE_TYPE=local
+ARG BUILD_DATE=""
+ARG VERSION="devel"
+
+ENV STORAGE_TYPE=${STORAGE_TYPE} \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+LABEL maintainer="simple-updown" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.description="Simple Upload/Download Service" \
+      storage.type="${STORAGE_TYPE}"
 
 WORKDIR /app
 
-# Define build argument and set it as environment variable
-ARG STORAGE_TYPE=local
-ENV STORAGE_TYPE=${STORAGE_TYPE}
-
-# Add build information (optional)
-ARG BUILD_DATE=""
-ARG VERSION="devel"
-LABEL maintainer="simple-updown"
-LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.version="${VERSION}"
-LABEL org.opencontainers.image.description="Simple Upload/Download Service"
-LABEL storage.type="${STORAGE_TYPE}"
-
-# Copy backend requirements and install
 COPY simple-updown-backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
 COPY simple-updown-backend/ .
 
-# Create necessary directories
-RUN mkdir -p /app/static /app/uploads /app/file_metadata /app/thumbnails
+RUN mkdir -p /app/static /app/uploads /app/thumbnails
 
-# Copy built frontend to backend static files
 COPY --from=frontend-builder /app/frontend/dist/ /app/static/
 
-# Create version info file
-RUN echo "Storage Type: ${STORAGE_TYPE}" > /app/static/version.txt && \
-    echo "Build Date: ${BUILD_DATE}" >> /app/static/version.txt && \
-    echo "Version: ${VERSION}" >> /app/static/version.txt
+RUN echo "Storage Type: ${STORAGE_TYPE}\nBuild Date: ${BUILD_DATE}\nVersion: ${VERSION}" \
+    > /app/static/version.txt
 
-# Create a non-root user and group
-RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    chown -R appuser:appuser /app
 
-# Set permissions for app directories
-RUN chown -R appuser:appuser /app
-
-# Switch to non-root user
 USER appuser
 
-# Expose API port
 EXPOSE 9000
 
-# Command to run the application
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "9000"]
