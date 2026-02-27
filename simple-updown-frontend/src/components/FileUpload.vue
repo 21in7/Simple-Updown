@@ -69,6 +69,12 @@
       <div v-if="uploadedCount > 0" class="upload-summary">
         {{ uploadedCount }}/{{ totalFilesToUpload }} 파일 업로드 완료
       </div>
+
+      <div v-if="uploadErrors.length > 0" class="upload-errors">
+        <p v-for="err in uploadErrors" :key="err.file" class="error-item">
+          ⚠️ {{ err.file }}: {{ err.error }}
+        </p>
+      </div>
     </div>
     
     <div v-if="isDragging" class="drag-overlay">
@@ -217,40 +223,29 @@ export default {
     },
     async uploadFile(file, index) {
       try {
-        console.log(`파일 "${file.name}" 업로드 시작`);
-        
+        const minutes = parseInt(this.expirationMinutes, 10);
         const formData = new FormData();
         formData.append('file', file);
-        // 명시적으로 숫자 변환 후 추가
-        const minutes = parseInt(this.expirationMinutes, 10);
         formData.append('expire_in_minutes', minutes);
-        
-        // 업로드 요청 전송 시 URL 파라미터로도 추가
-        const url = `/upload/?expire_in_minutes=${minutes}`;
-        const response = await axios.post(url, formData, {
-          headers: {
-            'Content-Type': 'multipart/form-data'
-          },
+
+        const response = await axios.post(`/upload/?expire_in_minutes=${minutes}`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
           onUploadProgress: progressEvent => {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
             this.fileProgress[index] = percentCompleted;
           }
         });
-        
+
         if (response.data && response.data.success) {
-          console.log(`파일 "${file.name}" 업로드 성공`);
           this.uploadedCount++;
         } else {
           throw new Error(`업로드 실패: ${response.data?.message || '알 수 없는 오류'}`);
         }
       } catch (error) {
-        console.error(`파일 "${file.name}" 업로드 실패:`, error);
         this.uploadErrors.push({
           file: file.name,
           error: error.message || '알 수 없는 오류'
         });
-        // 실패해도 업로드 시도 횟수는 증가
-        this.uploadedCount++;
       }
     }
   }
@@ -458,6 +453,20 @@ h2, h3 {
   margin-top: 15px;
   font-weight: bold;
   color: #4caf50;
+}
+
+.upload-errors {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #fff3f3;
+  border: 1px solid #f44336;
+  border-radius: 4px;
+}
+
+.error-item {
+  color: #f44336;
+  font-size: 0.9em;
+  margin: 4px 0;
 }
 
 .drag-overlay {
