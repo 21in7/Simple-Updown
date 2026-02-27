@@ -87,7 +87,7 @@
 </template>
 
 <script>
-import axios from 'axios';
+import { uploadFile as apiUploadFile } from '@/api/filesApi'
 import { formatFileSize } from '@/utils/fileUtils'
 
 export default {
@@ -219,23 +219,15 @@ export default {
     },
     async uploadFile(file, index) {
       try {
-        const minutes = parseInt(this.expirationMinutes, 10);
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('expire_in_minutes', minutes);
-
-        const response = await axios.post(`/upload/?expire_in_minutes=${minutes}`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-          onUploadProgress: progressEvent => {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            this.fileProgress[index] = percentCompleted;
-          }
+        const data = await apiUploadFile(file, this.expirationMinutes, progressEvent => {
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          this.fileProgress[index] = percentCompleted;
         });
 
-        if (response.data && response.data.success) {
+        if (data && data.success) {
           this.uploadedCount++;
         } else {
-          throw new Error(`업로드 실패: ${response.data?.message || '알 수 없는 오류'}`);
+          throw new Error(`업로드 실패: ${data?.message || '알 수 없는 오류'}`);
         }
       } catch (error) {
         this.uploadErrors.push({

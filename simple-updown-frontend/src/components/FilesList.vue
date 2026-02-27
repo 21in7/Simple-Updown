@@ -70,7 +70,7 @@
   </template>
   
   <script>
-  import axios from 'axios';
+  import { fetchFiles, deleteFile as apiDeleteFile, getDownloadUrl, getThumbnailUrl } from '@/api/filesApi'
   import { formatFileSize, getFileIcon, isImageFile } from '@/utils/fileUtils'
   import { isUnlimited, isExpiringSoon, getTimeLeft, formatDate } from '@/utils/dateUtils'
 
@@ -142,9 +142,9 @@
     methods: {
       async fetchFiles() {
         try {
-          const response = await axios.get('/api/files/');
-          if (response.data && response.data.files) {
-            this.files = response.data.files.filter(file =>
+          const data = await fetchFiles();
+          if (data && data.files) {
+            this.files = data.files.filter(file =>
               file && file.file_name && file.file_size > 0 && file.hash && file.hash.sha256
             );
           } else {
@@ -163,9 +163,8 @@
       isExpiringSoon,
       getTimeLeft,
       formatDate,
-      // 썸네일 URL 가져오기
       getThumbnailUrl(fileHash) {
-        return `/thumbnail/${fileHash}?width=80&height=80`;
+        return getThumbnailUrl(fileHash) + '?width=80&height=80';
       },
       // 썸네일 로드 실패 시 처리
       onThumbnailError(event) {
@@ -189,7 +188,7 @@
       },
       downloadFile(file) {
         const link = document.createElement('a');
-        link.href = `/download/${file.hash.sha256}`;
+        link.href = getDownloadUrl(file.hash.sha256);
         link.download = file.file_name;
         document.body.appendChild(link);
         link.click();
@@ -198,7 +197,7 @@
       async deleteFile(fileHash) {
         if (!confirm('이 파일을 삭제하시겠습니까?')) return;
         try {
-          await axios.delete(`/files/${fileHash}`);
+          await apiDeleteFile(fileHash);
           this.files = this.files.filter(file => file.hash.sha256 !== fileHash);
         } catch (error) {
           alert('파일 삭제 중 오류가 발생했습니다.');
