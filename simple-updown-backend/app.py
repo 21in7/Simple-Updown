@@ -319,15 +319,9 @@ async def upload_file(file: UploadFile = File(...), expire_in_minutes: int = 5, 
         gc.collect()
         
         # 파일 업로드 - 임시 파일 경로를 전달하여 스트림으로 처리
-        if storage_type == "local":
-            upload_success = storage.upload_file(temp_file_path, file_hash)
-            # 업로드 실패 시 예외 발생
-            if not upload_success:
-                raise HTTPException(status_code=500, detail="Failed to store file")
-        else:
-            upload_success = r2.upload_file(temp_file_path, file_hash)
-            if not upload_success:
-                raise HTTPException(status_code=500, detail="Failed to store file in R2")
+        upload_success = storage.upload_file(temp_file_path, file_hash)
+        if not upload_success:
+            raise HTTPException(status_code=500, detail="Failed to store file")
         
         # 현재 시간 계산 (UTC로 명시)
         now = datetime.datetime.utcnow()
@@ -435,11 +429,7 @@ async def download_file(file_hash: str):
         if current_time > expire_time:
             # 파일 삭제
             print(f"파일 만료됨, 삭제 진행: {file_hash}")
-            if storage_type == "local":
-                storage.delete_file(file_hash)
-            else:
-                r2.delete_file(file_hash)
-            
+            storage.delete_file(file_hash)
             db.delete(doc_id)
             raise HTTPException(status_code=404, detail="File expired and deleted")
             
@@ -470,7 +460,7 @@ async def download_file(file_hash: str):
                         raise HTTPException(status_code=404, detail="File not found")
                 else:
                     # R2 스토리지는 StreamingResponse를 활용
-                    stream = r2.get_file_stream(file_hash)
+                    stream = storage.get_file_stream(file_hash)
                     if stream:
                         for chunk in stream:
                             yield chunk
@@ -502,11 +492,7 @@ async def delete_file(file_hash: str):
     for doc_id, metadata in db.list_all().items():
         if metadata.get("hash", {}).get("sha256") == file_hash:
             # 파일 삭제
-            success = False
-            if storage_type == "local":
-                success = storage.delete_file(file_hash)
-            else:
-                success = r2.delete_file(file_hash)
+            success = storage.delete_file(file_hash)
                 
             if success:
                 # 메타데이터 삭제
@@ -550,10 +536,7 @@ def delete_expired_files():
                 file_hash = metadata.get("hash", {}).get("sha256")
                 if file_hash:
                     print(f"만료된 파일 삭제: {metadata.get('file_name', 'unknown')}, 해시: {file_hash}")
-                    if storage_type == "local":
-                        storage.delete_file(file_hash)
-                    else:
-                        r2.delete_file(file_hash)
+                    storage.delete_file(file_hash)
                 expired_docs.append(doc_id)
         except (ValueError, TypeError) as e:
             error_count += 1
@@ -696,7 +679,7 @@ async def get_thumbnail(file_hash: str, width: int = 100, height: int = 100):
                 raise HTTPException(status_code=500, detail=f"Error generating thumbnail: {str(e)}")
         else:
             # R2 스토리지는 바이트 데이터로 처리
-            img_data = r2.get_file_bytes(file_hash)
+            img_data = storage.get_file_bytes(file_hash)
             if not img_data:
                 raise HTTPException(status_code=404, detail="Image data not found")
             
