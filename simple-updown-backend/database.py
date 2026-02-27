@@ -11,8 +11,14 @@ class FileMetadataDB:
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
+    async def _connect(self):
+        db = await aiosqlite.connect(self.db_path, timeout=30)
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA busy_timeout=30000")
+        return db
+
     async def init(self) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS files (
                     id TEXT PRIMARY KEY,
@@ -35,7 +41,7 @@ class FileMetadataDB:
 
     async def insert(self, metadata: Dict[str, Any]) -> str:
         doc_id = str(uuid.uuid4())
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             await db.execute(
                 """
                 INSERT OR IGNORE INTO files
@@ -64,7 +70,7 @@ class FileMetadataDB:
     async def get_by_hash(
         self, file_hash: str
     ) -> Optional[Tuple[str, Dict[str, Any]]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM files WHERE file_hash = ?", (file_hash,)
@@ -75,19 +81,19 @@ class FileMetadataDB:
                 return row["id"], self._row_to_metadata(row)
 
     async def list_all(self) -> Dict[str, Dict[str, Any]]:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM files") as cursor:
                 rows = await cursor.fetchall()
                 return {row["id"]: self._row_to_metadata(row) for row in rows}
 
     async def delete(self, doc_id: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             await db.execute("DELETE FROM files WHERE id = ?", (doc_id,))
             await db.commit()
 
     async def update_filename(self, doc_id: str, file_name: str) -> None:
-        async with aiosqlite.connect(self.db_path) as db:
+        async with await self._connect() as db:
             await db.execute(
                 "UPDATE files SET file_name = ? WHERE id = ?", (file_name, doc_id)
             )
