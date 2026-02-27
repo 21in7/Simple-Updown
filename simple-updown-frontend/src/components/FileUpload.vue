@@ -88,6 +88,7 @@
 
 <script>
 import axios from 'axios';
+import { formatFileSize } from '@/utils/fileUtils'
 
 export default {
   name: 'FileUpload',
@@ -162,12 +163,7 @@ export default {
         this.isDragging = false;
       }
     },
-    formatFileSize(bytes) {
-      if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
-      if (bytes < 1024) return bytes + ' B';
-      else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-      else return (bytes / 1048576).toFixed(1) + ' MB';
-    },
+    formatFileSize,
     async uploadFiles() {
       if (this.selectedFiles.length === 0 || this.uploadInProgress) return;
       

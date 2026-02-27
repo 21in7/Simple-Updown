@@ -71,7 +71,9 @@
   
   <script>
   import axios from 'axios';
-  
+  import { formatFileSize, getFileIcon, isImageFile } from '@/utils/fileUtils'
+  import { isUnlimited, isExpiringSoon, getTimeLeft, formatDate } from '@/utils/dateUtils'
+
   export default {
     name: 'FilesList',
     data() {
@@ -154,35 +156,16 @@
           this.loading = false;
         }
       },
-      // 이미지 파일인지 확인
-      isImageFile(filename) {
-        if (!filename) return false;
-        const lowerFilename = filename.toLowerCase();
-        return lowerFilename.endsWith('.jpg') || 
-               lowerFilename.endsWith('.jpeg') || 
-               lowerFilename.endsWith('.png') || 
-               lowerFilename.endsWith('.gif') || 
-               lowerFilename.endsWith('.webp') || 
-               lowerFilename.endsWith('.bmp');
-      },
+      isImageFile,
+      getFileIcon,
+      formatFileSize,
+      isUnlimited,
+      isExpiringSoon,
+      getTimeLeft,
+      formatDate,
       // 썸네일 URL 가져오기
       getThumbnailUrl(fileHash) {
         return `/thumbnail/${fileHash}?width=80&height=80`;
-      },
-      // 파일 아이콘 가져오기
-      getFileIcon(filename) {
-        if (!filename) return '📄';
-        
-        const lowerFilename = filename.toLowerCase();
-        if (this.isImageFile(lowerFilename)) return '🖼️';
-        if (lowerFilename.endsWith('.pdf')) return '📕';
-        if (lowerFilename.endsWith('.doc') || lowerFilename.endsWith('.docx')) return '📝';
-        if (lowerFilename.endsWith('.xls') || lowerFilename.endsWith('.xlsx')) return '📊';
-        if (lowerFilename.endsWith('.ppt') || lowerFilename.endsWith('.pptx')) return '📊';
-        if (lowerFilename.endsWith('.zip') || lowerFilename.endsWith('.rar')) return '🗜️';
-        if (lowerFilename.endsWith('.txt')) return '📄';
-        
-        return '📁';
       },
       // 썸네일 로드 실패 시 처리
       onThumbnailError(event) {
@@ -202,48 +185,6 @@
           }, 2000);
         } catch (error) {
           alert('링크 복사에 실패했습니다. 브라우저에서 클립보드 접근을 허용해주세요.');
-        }
-      },
-      formatFileSize(bytes) {
-        if (typeof bytes !== 'number' || isNaN(bytes)) return '0 B';
-        if (bytes < 1024) return bytes + ' B';
-        else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-        else return (bytes / 1048576).toFixed(1) + ' MB';
-      },
-      formatDate(dateStr) {
-        if (!dateStr) return '';
-        try {
-          const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
-          if (isNaN(date.getTime())) return '날짜 오류';
-          return `${date.getFullYear()}.${(date.getMonth() + 1).toString().padStart(2, '0')}.${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-        } catch (error) {
-          return '날짜 오류';
-        }
-      },
-      isExpiringSoon(expireTimeStr) {
-        if (!expireTimeStr) return false;
-        const now = new Date();
-        const expireTime = new Date(expireTimeStr.endsWith('Z') ? expireTimeStr : expireTimeStr + 'Z');
-        const diffMs = expireTime - now;
-        if (diffMs > 1000 * 60 * 60 * 24 * 365 * 90) return false;
-        return diffMs < 24 * 60 * 60 * 1000;
-      },
-      getTimeLeft(expireTimeStr) {
-        if (!expireTimeStr) return '';
-        try {
-          const now = new Date();
-          const expireTime = new Date(expireTimeStr.endsWith('Z') ? expireTimeStr : expireTimeStr + 'Z');
-          const diffMs = expireTime - now;
-          if (diffMs <= 0) return '만료됨';
-          if (diffMs > 1000 * 60 * 60 * 24 * 365 * 90) return '무제한';
-          const diffDays = Math.floor(diffMs / (24 * 60 * 60 * 1000));
-          const diffHours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-          const diffMinutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
-          if (diffDays > 0) return `${diffDays}일 ${diffHours}시간 남음`;
-          if (diffHours > 0) return `${diffHours}시간 ${diffMinutes}분 남음`;
-          return `${diffMinutes}분 남음`;
-        } catch (error) {
-          return '시간 계산 오류';
         }
       },
       downloadFile(file) {
@@ -283,11 +224,6 @@
         } else {
           return `${Math.floor(mins / 10080)}주`;
         }
-      },
-      isUnlimited(expireTimeStr) {
-        if (!expireTimeStr) return false;
-        const expireTime = new Date(expireTimeStr.endsWith('Z') ? expireTimeStr : expireTimeStr + 'Z');
-        return expireTime - Date.now() > 1000 * 60 * 60 * 24 * 365 * 90;
       },
       displayUploadMessage(message) {
         this.showMultiUploadMessage = true;
