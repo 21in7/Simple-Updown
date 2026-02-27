@@ -2,15 +2,16 @@ import os
 import shutil
 import tempfile
 import time
+from typing import Optional, Generator
 from utils import format_file_size
 
+
 class LocalStorage:
-    def __init__(self, upload_dir="/app/uploads"):
+    def __init__(self, upload_dir: str = "/app/uploads") -> None:
         self.upload_dir = upload_dir
-        # 디렉토리가 없으면 생성
         os.makedirs(upload_dir, exist_ok=True)
 
-    def upload_file(self, file_obj, file_name):
+    def upload_file(self, file_obj, file_name: str) -> bool:
         """로컬 파일 시스템에 파일 업로드 (완전 스트리밍 방식)"""
         destination = os.path.join(self.upload_dir, file_name)
         
@@ -84,7 +85,7 @@ class LocalStorage:
             traceback.print_exc()
             return False
             
-    def _stream_copy_file(self, src, dst, buffer_size=8*1024*1024):
+    def _stream_copy_file(self, src: str, dst: str, buffer_size: int = 8 * 1024 * 1024) -> bool:
         """대용량 파일을 스트리밍 방식으로 복사 (메모리 사용량 최소화)"""
         try:
             # 이미 존재하는 목적지 파일 삭제
@@ -134,28 +135,21 @@ class LocalStorage:
             traceback.print_exc()
             return False
 
-    def delete_file(self, file_name):
-        """파일 삭제"""
+    def delete_file(self, file_name: str) -> bool:
         file_path = os.path.join(self.upload_dir, file_name)
         if os.path.exists(file_path):
             os.remove(file_path)
             return True
         return False
 
-    def get_file_url(self, file_name):
-        """파일 URL 생성"""
+    def get_file_url(self, file_name: str) -> str:
         return f"/files/{file_name}"
 
-    def file_exists(self, file_name):
-        """파일 존재 여부 확인"""
+    def file_exists(self, file_name: str) -> bool:
         file_path = os.path.join(self.upload_dir, file_name)
         return os.path.exists(file_path) and os.path.isfile(file_path)
 
-    def get_file_bytes(self, file_name):
-        """
-        파일을 읽어 바이트로 반환합니다.
-        메모리 사용량이 중요한 경우 stream_file 메서드를 사용하는 것이 좋습니다.
-        """
+    def get_file_bytes(self, file_name: str) -> Optional[bytes]:
         try:
             file_path = os.path.join(self.upload_dir, file_name)
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
@@ -168,11 +162,7 @@ class LocalStorage:
             print(f"파일 읽기 오류: {str(e)}")
             return None
     
-    def stream_file(self, file_name, chunk_size=1024 * 1024):
-        """
-        파일을 청크 단위로 스트리밍합니다.
-        메모리 사용량을 최소화하기 위해 제네레이터를 사용합니다.
-        """
+    def stream_file(self, file_name: str, chunk_size: int = 1024 * 1024) -> Optional[Generator]:
         try:
             file_path = os.path.join(self.upload_dir, file_name)
             if not os.path.exists(file_path) or not os.path.isfile(file_path):
@@ -189,8 +179,7 @@ class LocalStorage:
             print(f"파일 스트리밍 오류: {str(e)}")
             return None
     
-    def save_file(self, file_name, file_content):
-        """파일 저장하기"""
+    def save_file(self, file_name: str, file_content: bytes) -> bool:
         try:
             file_path = os.path.join(self.upload_dir, file_name)
             with open(file_path, "wb") as f:
@@ -200,10 +189,7 @@ class LocalStorage:
             print(f"파일 저장 오류: {str(e)}")
             return False
     
-    def save_file_stream(self, file_name, file_stream):
-        """
-        스트림에서 파일 저장하기 (메모리 효율적)
-        """
+    def save_file_stream(self, file_name: str, file_stream) -> bool:
         try:
             file_path = os.path.join(self.upload_dir, file_name)
             with open(file_path, "wb") as output_file:
